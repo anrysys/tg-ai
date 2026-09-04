@@ -1,0 +1,47 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  english-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGENTS.md rule 1. Documentation an agent cannot read is documentation
+      # that does not exist.
+      - name: Fail on non-English text
+        run: |
+          if grep -rlP '[\p{Cyrillic}\p{Greek}\p{Han}\p{Arabic}\p{Hebrew}]' \
+              --include='*.md' --include='*.py' --include='*.sql' \
+              --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules \
+              --exclude-dir=i18n . ; then
+            echo "::error::Non-English text found in the files above (AGENTS.md rule 1)"
+            exit 1
+          fi
+          echo "english-only: OK"
+
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A broken link is worse than a missing document: an agent follows it,
+      # finds nothing, and invents the content.
+      - name: Check relative links
+        run: python scripts/check_links.py
+
+  markdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"

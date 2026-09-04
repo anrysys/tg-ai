@@ -1,0 +1,28 @@
+# --- Telegram credentials: NEVER commit ---------------------------------
+# A .session file contains the full MTProto auth key. Anyone holding it
+# controls the account. See docs/70-ops/security.md.
+*.session
+*.session-journal
+*.session-wal
+*.session-shm
+
+# --- Secrets ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Python -------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# --- Tooling ------------------------------------------------------------
+node_modules/
+.DS_Store

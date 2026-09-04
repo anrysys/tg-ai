@@ -1,0 +1,205 @@
+"""Anti-spam and anti-ban primitives.
+
+This module is deliberately pure: no network, no database, no Telethon client.
+Everything here is unit-testable, because these rules are the difference
+between a working account and a banned one.
+
+Specified by SPEC-SND-002 (chunking), SPEC-SND-003 (pacing) and
+SPEC-SND-004 (error translation) in ``docs/10-product/srs.md``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import logging
+from collections.abc import Awaitable, Callable
+from typing import ParamSpec
+
+from telethon import errors
+
+log = logging.getLogger(__name__)
+
+#: Telegram rejects messages above 4096 characters. We stop at 4000 so that
+#: any formatting the client adds cannot push a chunk over the hard limit.
+MAX_CHUNK_CHARS = 4000
+
+#: Seconds to wait between consecutive chunks of one logical message.
+#: Sending several messages per second to the same peer is a spam signal.
+CHUNK_DELAY_SECONDS = 2.5
+
+#: Seconds to wait between dialogs while dumping history.
+SYNC_DIALOG_DELAY_SECONDS = 1.0
+
+#: A chunk shorter than this fraction of the limit looks like spam-shaped
+#: dribble, so a break point is only accepted past this offset.
+_MIN_BREAK_RATIO = 0.4
+
+#: Break points, best first. Each entry is ``(separator, chars_to_keep)`` where
+#: ``chars_to_keep`` is how much of the separator stays in the chunk - a full
+#: stop belongs to the sentence it ends, a newline belongs to nothing.
+_BREAKPOINTS: tuple[tuple[str, int], ...] = (
+    ("\n\n", 0),
+    ("\n", 0),
+    (". ", 1),
+    ("! ", 1),
+    ("? ", 1),
+    ("… ", 1),
+    ("; ", 1),
+    (", ", 1),
+    (" ", 0),
+)
+
+FLOOD_WAIT_TEMPLATE = "Telegram API limit reached. We must wait {seconds} seconds"
+
+
+class ToolError(Exception):
+    """An expected failure whose message is already written for the agent.
+
+    Raising this instead of a generic exception keeps a known condition - a
+    missing session, an unresolvable peer - out of the error log as a stack
+    trace, while still short-circuiting the tool.
+    """
+
+
+def split_message(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """Split ``text`` into chunks of at most ``limit`` characters.
+
+    Breaks are chosen at the highest-ranked boundary available: paragraph,
+    then line, then sentence, then clause, then word. A word is only cut in
+    half when a single word exceeds ``limit`` on its own, which is the sole
+    case where no boundary exists.
+
+    Args:
+        text: The message body. May be empty.
+        limit: Maximum characters per chunk.
+
+    Returns:
+        Chunks in order. An empty or whitespace-only ``text`` yields ``[]``.
+
+    Raises:
+        ValueError: ``limit`` is not positive.
+    """
+    if limit <= 0:
+        raise ValueError(f"limit must be positive, got {limit}")
+
+    rest = text.strip()
+    if not rest:
+        return []
+
+    chunks: list[str] = []
+    min_break = max(1, int(limit * _MIN_BREAK_RATIO))
+
+    while len(rest) > limit:
+        cut, consumed = _find_break(rest, limit, min_break)
+        chunk = rest[:cut].rstrip()
+        if chunk:
+            chunks.append(chunk)
+        rest = rest[consumed:].lstrip()
+
+    if rest:
+        chunks.append(rest)
+
+    return chunks
+
+
+def _find_break(rest: str, limit: int, min_break: int) -> tuple[int, int]:
+    """Locate the best break in ``rest[:limit]``.
+
+    Returns:
+        ``(cut, consumed)`` - the chunk is ``rest[:cut]`` and the next chunk
+        starts at ``rest[consumed:]``. The gap between them is the separator.
+    """
+    for separator, keep in _BREAKPOINTS:
+        end = limit - keep + len(separator)
+        index = rest.rfind(separator, min_break, end)
+        if index != -1:
+            return index + keep, index + len(separator)
+
+    # No boundary at all: a single token longer than the limit. Hard-cut it,
+    # which is lossless because the pieces are re-joined by the reader.
+    return limit, limit
+
+
+async def sleep_between_chunks() -> None:
+    """Pause between two chunks of the same logical message (SPEC-SND-003)."""
+    await asyncio.sleep(CHUNK_DELAY_SECONDS)
+
+
+def describe_telegram_error(exc: BaseException) -> str | None:
+    """Translate a Telethon exception into a message the agent can act on.
+
+    Returns ``None`` when the exception is not a recognised Telegram condition,
+    which tells the caller to fall back to a generic report.
+    """
+    if isinstance(exc, errors.FloodWaitError):
+        return "ERROR: " + FLOOD_WAIT_TEMPLATE.format(seconds=exc.seconds)
+
+    if isinstance(exc, errors.PeerFloodError):
+        return (
+            "ERROR: Telegram has flagged this account for spam (PeerFloodError). "
+            "Stop sending messages now. Wait several hours, and message only "
+            "people already in your contacts. Repeated attempts escalate to a "
+            "permanent ban. To appeal, write to @SpamBot from the Telegram app."
+        )
+
+    if isinstance(exc, errors.UserPrivacyRestrictedError):
+        return (
+            "ERROR: This user's privacy settings do not allow messages from you. "
+            "Nothing was sent and nothing can be done from this side."
+        )
+
+    if isinstance(exc, errors.UserIsBlockedError):
+        return "ERROR: This user has blocked your account. Nothing was sent."
+
+    if isinstance(exc, errors.UserDeactivatedBanError):
+        return (
+            "ERROR: Your own account is deactivated or banned by Telegram. "
+            "The MCP server cannot operate. Contact Telegram support."
+        )
+
+    if isinstance(exc, errors.AuthKeyUnregisteredError | errors.SessionRevokedError):
+        return (
+            "ERROR: The Telegram session is no longer valid - it was revoked or "
+            "logged out. Run `just tg-auth` in a terminal to sign in again."
+        )
+
+    if isinstance(exc, errors.UsernameNotOccupiedError | errors.UsernameInvalidError):
+        return (
+            "ERROR: No Telegram account owns that username. Check the spelling, "
+            "or use a phone number in international format instead."
+        )
+
+    if isinstance(exc, errors.ChatWriteForbiddenError):
+        return "ERROR: You do not have permission to write in that chat."
+
+    return None
+
+
+P = ParamSpec("P")
+
+
+def guarded_tool(func: Callable[P, Awaitable[str]]) -> Callable[P, Awaitable[str]]:
+    """Ensure an MCP tool always returns text and never raises (SPEC-SND-004).
+
+    An exception escaping a tool handler is far worse than a bad answer: it
+    can tear down the stdio server mid-session and leave the agent blind.
+    Every failure is therefore converted into an ``ERROR:`` line the agent
+    can read and reason about.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> str:
+        try:
+            return await func(*args, **kwargs)
+        except ToolError as exc:
+            return f"ERROR: {exc}"
+        except Exception as exc:  # the whole point of this decorator
+            described = describe_telegram_error(exc)
+            if described is not None:
+                log.warning("%s failed: %s", func.__name__, exc)
+                return described
+            log.exception("%s failed unexpectedly", func.__name__)
+            return f"ERROR: {type(exc).__name__}: {exc}"
+
+    return wrapper

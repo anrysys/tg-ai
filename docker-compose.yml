@@ -1,0 +1,27 @@
+# Local-only PostgreSQL archive for tg-ai.
+#
+# Bound to 127.0.0.1 on purpose: this database holds the full text of every
+# private conversation on the account. It must never be reachable off-host.
+# Port 5434 because 5432 and 5433 are already taken on this machine.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-ai-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5434:5432"
+    environment:
+      POSTGRES_USER: tgai
+      POSTGRES_PASSWORD: tgai
+      POSTGRES_DB: tgai
+    volumes:
+      - tg-ai-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tgai -d tgai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tg-ai-pgdata:

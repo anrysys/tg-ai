@@ -1,0 +1,14 @@
+# Dependency source of truth for tg-ai. Install with `just setup`.
+# pyproject.toml intentionally carries tooling config only, never dependencies,
+# so there is exactly one place a version can be changed.
+
+telethon==1.36.0
+mcp==1.9.4
+asyncpg==0.30.0
+python-dotenv==1.0.1
+
+# --- dev ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+ruff==0.8.4
+black==24.10.0

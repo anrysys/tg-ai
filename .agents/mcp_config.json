@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tg-ai": {
+      "command": "/home/anry/projects/tg-ai/.venv/bin/python",
+      "args": ["/home/anry/projects/tg-ai/server.py"],
+      "cwd": "/home/anry/projects/tg-ai"
+    }
+  }
+}

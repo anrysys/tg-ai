@@ -1,0 +1,17 @@
+{
+  // Documentation here is read by agents, not rendered on a site. Line length
+  // and inline HTML rules cost more than they buy; structural rules stay on.
+  "config": {
+    "MD013": false, // line length
+    "MD024": false, // duplicate headings: ADRs legitimately repeat section names
+    "MD033": false, // inline HTML
+    "MD041": false, // first line must be a heading: every file starts with frontmatter
+    "MD046": false, // code block style
+
+    // Every document carries a frontmatter `title:` AND an H1 by convention.
+    // Without this, markdownlint counts the frontmatter title as a second H1.
+    "MD025": { "front_matter_title": "" }
+  },
+  "globs": ["**/*.md"],
+  "ignores": [".venv/**", "node_modules/**", ".git/**"]
+}

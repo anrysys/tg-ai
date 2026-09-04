@@ -1,0 +1,24 @@
+# Tooling configuration only. Dependencies live in requirements.txt so that
+# there is exactly one place a version can change (see AGENTS.md).
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "ASYNC", "BLE", "RUF"]
+ignore = [
+    "E501",   # line length is enforced by the formatter
+    "RUF001", # ambiguous unicode: chat text is multilingual by nature
+    "RUF003",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
