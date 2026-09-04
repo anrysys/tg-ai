@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import unicodedata
 from collections.abc import Awaitable, Callable
 from typing import ParamSpec
 
@@ -203,3 +204,104 @@ def guarded_tool(func: Callable[P, Awaitable[str]]) -> Callable[P, Awaitable[str
             return f"ERROR: {type(exc).__name__}: {exc}"
 
     return wrapper
+
+
+#: Field length caps for a Dialog Persona, deliberately one character tighter
+#: than the CHECK constraints in ``sql/schema.sql``. The database constraint is
+#: the backstop; this is what the agent actually hits, so it gets a sentence it
+#: can act on instead of a raw asyncpg error string.
+PERSONA_FIELD_LIMITS: dict[str, int] = {
+    "addressing": 79,
+    "tone": 119,
+    "relationship": 119,
+    "notes": 239,
+}
+
+#: Characters that let text lie about its own structure: bidirectional
+#: overrides can reverse how a field renders, and zero-width characters can
+#: split a URL or a handle so the checks below miss it.
+_INVISIBLE_CHARACTERS = (
+    "\u200b\u200c\u200d\u2060\ufeff"  # zero-width space, non-joiner, joiner, word joiner, BOM
+    "\u202a\u202b\u202c\u202d\u202e"  # bidirectional embedding, override and pop
+)
+
+#: What a Persona field must not contain. These are structural, not semantic:
+#: no keyword blacklist appears here. Blocking the word "ignore" is theatre -
+#: it rejects honest descriptions of a writing style and stops no attacker who
+#: can phrase a sentence differently. What actually matters is that a stored
+#: field cannot carry a destination, an action or a forged fence.
+_PERSONA_REJECTIONS: tuple[tuple[str, str], ...] = (
+    ("://", "a URL"),
+    ("www.", "a URL"),
+    ("@", "a handle"),
+    ("tg_", "a tool name"),
+    ("---", "a fence marker"),
+)
+
+
+class PersonaFieldError(ValueError):
+    """A Dialog Persona field that must not be stored, with the reason why."""
+
+
+def sanitise_persona_field(name: str, value: str, *, required: bool) -> str:
+    """Normalise and vet one agent-written Dialog Persona field (SPEC-PSN-006).
+
+    A Persona is written by a model that has just read a conversation written
+    by other people, and what it writes is then replayed into a model's context
+    on every later read of that Dialog. That makes it the one place in this
+    project where content can become a standing instruction, which is why the
+    controls here are structural rather than a matter of prompting.
+
+    Three things happen, in order. Invisible and control characters are
+    removed, so a field cannot hide what it contains. All whitespace collapses
+    to single spaces, so a field cannot span lines and therefore cannot forge
+    the fence that marks Persona text as data. Anything carrying a destination
+    or an action - a URL, a handle, a tool name - is refused outright, because
+    a writing-style description has no legitimate need of one.
+
+    Args:
+        name: The field name, used in the error text and to pick the cap.
+        value: What the agent supplied.
+        required: Whether an empty result is an error or an acceptable blank.
+
+    Returns:
+        The cleaned value, ready to bind.
+
+    Raises:
+        PersonaFieldError: The field is empty when required, too long, or
+            carries something a style description must not carry. The caller
+            turns this into ``ERROR:`` text; nothing is stored.
+    """
+    cleaned = "".join(
+        character
+        for character in (value or "")
+        if character not in _INVISIBLE_CHARACTERS
+        and (character.isspace() or unicodedata.category(character)[0] != "C")
+    )
+    cleaned = " ".join(cleaned.split())
+
+    if not cleaned:
+        if required:
+            raise PersonaFieldError(
+                f"`{name}` is empty. Describe the writing style in a few words."
+            )
+        return ""
+
+    limit = PERSONA_FIELD_LIMITS.get(name, 120)
+    if len(cleaned) > limit:
+        raise PersonaFieldError(
+            f"`{name}` is {len(cleaned)} characters; the limit is {limit}. "
+            "A Persona field is a short description of style, not a briefing - "
+            "it is re-read on every message drafted for this dialog."
+        )
+
+    lowered = cleaned.lower()
+    for needle, description in _PERSONA_REJECTIONS:
+        if needle in lowered:
+            raise PersonaFieldError(
+                f"`{name}` was rejected: it contains {description}. Persona fields "
+                "describe how the account writes and nothing else - no links, "
+                "handles, tool names or instructions. Nothing was stored."
+            )
+
+    return cleaned

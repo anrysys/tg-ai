@@ -105,3 +105,25 @@ just db-psql
 SELECT count(*) FROM messages;
 SELECT username, last_synced_message_id, synced_at FROM dialogs ORDER BY synced_at DESC LIMIT 10;
 ```
+
+## What a resync cannot rebuild
+
+Everything in `dialogs` and `messages` comes back from Telegram. `dialog_personas`
+does not - a person wrote those rows, and Telegram has never seen them.
+
+`just db-reset` drops the volume and destroys them **silently**. Before running
+it, save them:
+
+```bash
+docker exec tg-ai-postgres pg_dump -U tgai -d tgai -t dialog_personas --data-only \
+  > dialog_personas.sql
+```
+
+and restore afterwards, once `just db-schema` has recreated the table:
+
+```bash
+docker exec -i tg-ai-postgres psql -U tgai -d tgai < dialog_personas.sql
+```
+
+An ordinary `just tg-sync` is safe: personas live in their own table precisely
+so a sync cannot touch them (`SPEC-PSN-001`).

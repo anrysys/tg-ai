@@ -18,6 +18,7 @@ record that the question was already settled.
 | --- | --- | --- |
 | TASK-007 | Run the M5 live acceptance checklist | The user: needs real credentials and a real account |
 | TASK-008 | Record the real archive size in `status.md` after the first full sync | TASK-007 |
+| TASK-011 | Write a Dialog Persona for each active dialog, and judge whether drafted replies read as the user's own | The user: only they can tell |
 
 ## Open questions
 
@@ -39,3 +40,4 @@ Do not pick a default for these. Ask the user.
 | TASK-005 | `sync_db.py` with resumable cursors and flood handling | M2 |
 | TASK-006 | MCP server with six tools and the Send Guard | M3, [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md) |
 | TASK-009 | Targeted sync (`--targets`, `just tg-sync-targets`) to avoid hours of flood waits on a large account | `SPEC-SYNC-006` |
+| TASK-010 | Dialog Persona: per-Dialog style, measured in-repo and described by the agent | M6, [ADR-0008](../20-architecture/adr/0008-dialog-persona-hybrid-authorship.md), `SPEC-PSN-001`..`008` |

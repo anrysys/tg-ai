@@ -33,6 +33,11 @@ function or document section `Chat`, `Conversation` or `Thread`.
 | **Flood Wait** | Telegram's `FloodWaitError`: a mandatory cooldown in seconds. Always reported to the agent, never silently swallowed in a tool. | `safety.describe_telegram_error` |
 | **Tool** | An MCP function the agent can call. Always returns text, never raises. | `server.py`, `@mcp.tool()` |
 | **Live account** | Telegram itself, reached over MTProto. Contrasted with the Archive. | `tg_get_recent_messages` |
+| **Dialog Persona** | How the account writes to one Peer: the agent-authored qualitative pattern plus the Style Metrics measured from `me`'s own archived messages. Never a "chat persona" or a "conversation style". | `dialog_personas` table, `tg_ai/persona.py` |
+| **Style Metrics** | The language-agnostic measurements a Dialog Persona is anchored to: length distribution, burst rate, case, punctuation, emoji and script mix. Numbers and Unicode script names only, never message text. | `persona.analyse_style` |
+| **Persona Baseline** | `dialog_personas.baseline_message_id` - the message id above which nothing is ever analysed. Frozen when the Persona is created so that messages this project itself sent cannot feed back into the Persona. | `db.rebaseline_persona` |
+| **Persona Drift** | The distance between a stored Dialog Persona and the account's writing today, reported on three axes: volume, age and metric drift. Reported, never silently corrected. | `persona.compare_style` |
+| **Dialog Lookup** | Resolving a Target to a Dialog using the Archive alone, with no call to the live account. Exact per key, never a substring. Forbidden in the send path. | `db.resolve_dialog` |
 
 ## Naming conventions
 

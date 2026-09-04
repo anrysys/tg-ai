@@ -16,7 +16,7 @@ inside an AI-agent session (Claude Code, Antigravity, or any MCP client). One
 account, one machine, no multi-tenancy, no other users - ever. Every design
 choice may assume that.
 
-## The three jobs
+## The four jobs
 
 ### UC-1 - Send from the agent session
 
@@ -48,6 +48,21 @@ no Telegram API call and therefore no rate limit and no ban risk.
 
 Satisfied by `tg_search_local_history`, backed by the Archive that `sync_db.py`
 fills. Governed by `SPEC-SRCH-*` and `SPEC-SYNC-*`.
+
+### UC-4 - Reply in the user's own voice
+
+> "Reply to `@someone` about the meeting."
+
+A reply drafted in a generic register is obvious to anyone who knows the user.
+Before drafting, the agent reads the **Dialog Persona** for that person: how the
+user addresses them, the register they use, and the measured shape of their own
+past messages in that conversation. The Persona is stored per Dialog and put in
+front of the model at drafting time.
+
+Satisfied by `tg_get_dialog_persona`, `tg_set_dialog_persona` and
+`tg_list_dialog_personas`, and by the Persona block `tg_get_recent_messages`
+prepends. Governed by `SPEC-PSN-*` and
+[ADR-0008](../20-architecture/adr/0008-dialog-persona-hybrid-authorship.md).
 
 ## Constraints
 

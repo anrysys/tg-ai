@@ -37,6 +37,8 @@ change and are therefore omitted from each row.
 | Reversed a decision recorded in an ADR | a **new** ADR marking the old one superseded. Never edit the old one |
 | Discovered a new way the account could be banned or leaked | [security.md](../70-ops/security.md) with a new `RISK-NN`, [srs.md](../10-product/srs.md) if code must change |
 | Finished, added or reordered planned work | [roadmap.md](../60-delivery/roadmap.md), [task-queue.md](../60-delivery/task-queue.md) |
+| Added or removed a user-facing capability | [prd.md](../10-product/prd.md) use case, [roadmap.md](../60-delivery/roadmap.md) |
+| Added or renamed a module under `tg_ai/` | [sad.md](../20-architecture/sad.md) module tree, [qa-and-testing.md](../50-process/qa-and-testing.md) coverage table |
 | Learned a recovery procedure the hard way | a new file under [runbooks/](../70-ops/runbooks/), linked from its README |
 
 ## When your change matches no row

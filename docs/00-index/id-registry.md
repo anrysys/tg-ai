@@ -30,6 +30,7 @@ one at the moment you write the thing, and record it here in the same change.
 | `RCV` | Reading the live account: recent messages, unread dialogs |
 | `SRCH` | Searching the archive |
 | `SYNC` | Filling the archive |
+| `PSN` | Per-Dialog style: the Dialog Persona, its measurement, freshness and safety |
 | `SEC` | Credentials, permissions, configuration, locality |
 
 ## Allocated
@@ -38,9 +39,10 @@ one at the moment you write the thing, and record it here in the same change.
 | --- | --- |
 | `SPEC-SND-001` .. `SPEC-SND-006` | In use |
 | `SPEC-RCV-001` .. `SPEC-RCV-004` | In use |
-| `SPEC-SRCH-001` .. `SPEC-SRCH-005` | In use |
+| `SPEC-SRCH-001` .. `SPEC-SRCH-006` | In use |
 | `SPEC-SYNC-001` .. `SPEC-SYNC-006` | In use |
+| `SPEC-PSN-001` .. `SPEC-PSN-008` | In use |
 | `SPEC-SEC-001` .. `SPEC-SEC-005` | In use |
-| `ADR-0000` .. `ADR-0007` | In use (`0000` is the template) |
-| `RISK-01` .. `RISK-06` | In use |
-| `TASK-001` .. `TASK-009` | In use |
+| `ADR-0000` .. `ADR-0008` | In use (`0000` is the template) |
+| `RISK-01` .. `RISK-07` | In use |
+| `TASK-001` .. `TASK-011` | In use |

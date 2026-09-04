@@ -78,6 +78,28 @@ Cannot be completed by an agent: needs real credentials and a real account.
 
 ---
 
+## M6 - Dialog Persona 🟨 code complete, live acceptance pending
+
+Per-Dialog style so a drafted reply sounds like the user
+([ADR-0008](../20-architecture/adr/0008-dialog-persona-hybrid-authorship.md)).
+
+- [x] `dialog_personas` table, applied and idempotent against PostgreSQL 16
+- [x] `tg_ai/persona.py`: language-agnostic Style Metrics, 28 offline tests
+- [x] Dialog Lookup: Archive-only Target resolution, ambiguity reported
+- [x] Three tools: `tg_get_dialog_persona`, `tg_set_dialog_persona`,
+      `tg_list_dialog_personas`
+- [x] Persona block prepended by `tg_get_recent_messages`
+- [x] Frozen Persona Baseline, verified against fixture data: 80 synthetic
+      agent-style messages did not move the measurements
+- [x] `RISK-07` sanitisation and the data fence
+- [ ] Confirm on a real dialog that a drafted reply reads as the user's own
+      (needs the user's judgement, not a test)
+
+**Acceptance:** the persona rows in
+[qa-and-testing.md](../50-process/qa-and-testing.md) pass on the live account.
+
+---
+
 ## Beyond M5 - not scheduled
 
 Each needs a PRD change and an ADR before any code.

@@ -32,6 +32,9 @@ your conversations never leaves `127.0.0.1`.
 | `tg_get_unread_dialogs(limit=5)` | Who has written to you |
 | `tg_search_local_history(query, target_username=None, limit=50)` | Full-text search of the local archive |
 | `tg_add_contact(phone_or_username, first_name, last_name="")` | Add a contact - the deliberate way to unblock a send to someone new |
+| `tg_get_dialog_persona(target, samples=12)` | How you write to one person: stored persona, measured style, real samples. Read this before drafting a reply |
+| `tg_set_dialog_persona(target, addressing, tone, relationship, notes="", overwrite=False)` | Record that style. Never silently overwrites |
+| `tg_list_dialog_personas(limit=20)` | Which archived dialogs have a persona and which do not |
 | `tg_whoami()` | Health check: account, session, database, archive |
 
 Full signatures: [docs/30-api/mcp-tools.md](docs/30-api/mcp-tools.md).
@@ -118,7 +121,7 @@ for an SMS code:
 | --- | --- | --- |
 | `auth.py` | Once, in a terminal | Logs in, writes `tg_session.session` |
 | `sync_db.py` | On demand | Copies private chat history into PostgreSQL |
-| `server.py` | Spawned by the agent | Serves the six tools over stdio |
+| `server.py` | Spawned by the agent | Serves the nine tools over stdio |
 
 Search hits PostgreSQL, not Telegram - which is why it is instant, unlimited,
 and carries no ban risk. The trade-off is that the archive is current as of the

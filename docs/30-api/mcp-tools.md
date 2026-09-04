@@ -62,6 +62,33 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
       "last_name":         {"type": "string", "default": ""}
     }
   },
+  "tg_get_dialog_persona": {
+    "description": "Read how the user writes to one person, before drafting a reply.",
+    "required": ["target"],
+    "properties": {
+      "target":  {"type": "string", "description": "@username, +phone, numeric id, or a name. Archive-only; ambiguity is reported, never guessed"},
+      "samples": {"type": "integer", "default": 12, "clamped": [0, 50]}
+    }
+  },
+  "tg_set_dialog_persona": {
+    "description": "Record how the user writes to one person. Never silently overwrites.",
+    "required": ["target", "addressing", "tone", "relationship"],
+    "properties": {
+      "target":       {"type": "string"},
+      "addressing":   {"type": "string", "maxLength": 79},
+      "tone":         {"type": "string", "maxLength": 119},
+      "relationship": {"type": "string", "maxLength": 119},
+      "notes":        {"type": "string", "default": "", "maxLength": 239},
+      "overwrite":    {"type": "boolean", "default": false}
+    }
+  },
+  "tg_list_dialog_personas": {
+    "description": "List which archived dialogs have a stored style persona.",
+    "required": [],
+    "properties": {
+      "limit": {"type": "integer", "default": 20, "clamped": [1, 100]}
+    }
+  },
   "tg_whoami": {
     "description": "Health check: account, session, database, archive coverage.",
     "required": [],

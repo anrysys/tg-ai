@@ -57,6 +57,62 @@ would make "messages that contain nothing to search" indistinguishable from
 "messages we failed to read". `coalesce(text, '')` inside the generated column
 handles the search side.
 
+## `dialog_personas` - one row per Dialog Persona
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `chat_id` | `BIGINT` PK | FK to `dialogs`, `ON DELETE CASCADE` |
+| `addressing` | `TEXT` | Agent-written: how the account addresses this Peer. 1-80 characters |
+| `tone` | `TEXT` | Agent-written: the register. 1-120 |
+| `relationship` | `TEXT` | Agent-written: who this Peer is to the account owner. 1-120 |
+| `notes` | `TEXT` | Agent-written, optional: one further habit worth reproducing. Up to 240 |
+| `metrics` | `JSONB` | The **Style Metrics** snapshot the Persona was written against, so drift can be measured later |
+| `baseline_message_id` | `BIGINT` | The **Persona Baseline**: nothing above this id is ever analysed |
+| `analysed_message_id` | `BIGINT` | Top of the window the current numbers came from |
+| `analysed_count` | `INTEGER` | How many of the account's own messages that was |
+| `analysed_at` | `TIMESTAMPTZ` | When the numbers were last computed. The age axis of freshness |
+| `updated_at` | `TIMESTAMPTZ` | When the prose last changed |
+
+### Why this is its own table and not columns on `dialogs`
+
+`_UPSERT_DIALOG_SQL` rewrites `username`, `first_name`, `last_name`, `phone` and
+`is_contact` on every sync. A Persona stored on `dialogs` would be destroyed by
+the next `just tg-sync` - and unlike every other row in this database, a Persona
+cannot be rebuilt from Telegram, because a person wrote it (`SPEC-PSN-001`).
+
+### Why `baseline_message_id` exists, and why it is frozen
+
+Every message this server sends is archived with `is_outgoing` set. In the
+database it is indistinguishable from one the account owner typed. If the
+analysis window moved forward on every refresh, a Persona would start measuring
+its own drafted output and converge on a model of the model - and because model
+output is more self-consistent than human writing, the result would look better
+while being wrong.
+
+So `_UPDATE_PERSONA_SQL` does not name the column. Only
+`_REBASELINE_PERSONA_SQL` moves it, and only forward, the way the Sync Cursor
+does (`SPEC-PSN-003`).
+
+### Why `metrics` is `JSONB` and the prose is not
+
+The metric set changes whenever the code does, and this schema is
+`CREATE TABLE IF NOT EXISTS` with no migration runner - a new metric must not
+require an `ALTER`. The metrics are also never queried by key; they are written
+whole and read whole.
+
+The agent-written fields get the opposite treatment for the opposite reason.
+They are the injection surface (`RISK-07`), so each carries a `CHECK` constraint
+on its length - a real control that survives a future session rewriting the
+Python, which a JSONB blob could not express. The Python caps in
+`safety.PERSONA_FIELD_LIMITS` are deliberately one character tighter, so the
+database constraint is a backstop the user never sees.
+
+### No index, deliberately
+
+There is at most one row per Dialog and every read is by primary key. The only
+scan is `tg_list_dialog_personas` over a few hundred rows. An index here would
+be cargo cult.
+
 ## Indexes
 
 | Index | Serves |

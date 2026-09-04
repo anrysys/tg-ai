@@ -36,6 +36,7 @@ single fact produces the process split ([ADR-0002](adr/0002-three-process-split-
    ┌───────────────────────────────┐  ◄──────────────────────-┘        │
    │  PostgreSQL 16  (127.0.0.1)   │                              ┌────┴─────┐
    │  dialogs + messages + FTS     │                              │ AI agent │
+   │  + dialog_personas            │                              │          │
    └───────────────────────────────┘                              └──────────┘
 ```
 
@@ -43,7 +44,7 @@ single fact produces the process split ([ADR-0002](adr/0002-three-process-split-
 | --- | --- | --- | --- | --- |
 | `auth.py` | Once, interactively | nothing | the Session | yes |
 | `sync_db.py` | On demand / periodically | the Session Clone | the Archive | yes, read-only |
-| `server.py` | Spawned by the agent | the Session, the Archive | Telegram messages | yes |
+| `server.py` | Spawned by the agent | the Session, the Archive | Telegram messages, `dialog_personas` | yes |
 
 ## Layering
 
@@ -51,15 +52,29 @@ single fact produces the process split ([ADR-0002](adr/0002-three-process-split-
 server.py / sync_db.py / auth.py     entrypoints: orchestration and I/O only
         │
         ├── tg_ai/formatting.py      data -> agent-readable text
-        ├── tg_ai/safety.py          chunking, pacing, error translation (pure)
+        ├── tg_ai/safety.py          chunking, pacing, persona sanitisation (pure)
         ├── tg_ai/tg_client.py       Telethon: peers, contacts, sessions
         ├── tg_ai/db.py              asyncpg: raw SQL, no ORM (ADR-0006)
+        │       └── tg_ai/persona.py style measurement (pure, stdlib only)
         └── tg_ai/config.py          the only module that reads the environment
 ```
 
-Dependencies point downward only. `safety.py` imports nothing from the project
-and no I/O library, which is what makes the anti-ban rules unit-testable
-without a network or a database.
+Dependencies point downward only. `safety.py` and `persona.py` import nothing
+from the project and no I/O library, which is what makes the anti-ban rules and
+the style measurement unit-testable without a network or a database.
+
+`db.py` and `tg_client.py` are peers and must never import each other. Where
+both are needed - resolving a Target against the Archive rather than the live
+account - the composition happens in `server.py`, at the entrypoint.
+
+### `server.py` writes to the Archive, but only to one table
+
+The diagram above shows `sync_db.py` as the writer and `server.py` as a reader.
+Since ADR-0008 that is no longer quite true: `tg_set_dialog_persona` writes, and
+`tg_get_dialog_persona` refreshes the measurements. It writes to
+`dialog_personas` and to nothing else. `dialogs` and `messages` remain owned by
+`sync_db.py`, which is what lets a resync run without coordinating with a live
+server.
 
 ## Why the session is copied for sync
 

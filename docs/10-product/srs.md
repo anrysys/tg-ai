@@ -25,7 +25,7 @@ one of them is a defect - decide which, fix it, and record the decision.
 
 Areas are defined in the [ID registry](../00-index/id-registry.md):
 `SND` sending, `RCV` reading live, `SRCH` searching the archive, `SYNC`
-filling the archive, `SEC` credentials and locality.
+filling the archive, `PSN` per-Dialog style, `SEC` credentials and locality.
 
 ---
 
@@ -41,6 +41,12 @@ is not in the account's contacts. In that case it returns a `WARNING:` naming
 
 There is deliberately **no** `force` parameter. Overriding the guard requires a
 separate, deliberate `tg_add_contact` call.
+
+The Dialog Lookup path (`SPEC-SRCH-006`) MUST NOT be used to resolve a send
+target. Resolving the target a second way is one of the bypasses ADR-0005
+names explicitly, and a database-backed resolver in the send path is exactly
+that. `tg_send_message` may read the Archive only after delivery, and only
+through a helper that swallows its own failures (`SPEC-PSN-008`).
 
 **Rationale.** Messaging strangers from a personal account is the primary cause
 of `PeerFloodError` and account bans. An agent acting on an ambiguous
@@ -210,6 +216,33 @@ possibility of a stale Archive and the command that refreshes it.
 synced". The agent cannot distinguish them without being told.
 **Test.** `formatting.render_search_hits` with an empty list.
 
+### SPEC-SRCH-006 - Dialog Lookup resolves against the Archive alone
+
+**Requirement.** `db.resolve_dialog` MUST resolve a Target to a Dialog using
+only the `dialogs` table, with no Telegram API call. Matching MUST be exact per
+key - username, numeric id, digits-only phone, first, last or full name - and
+MUST NOT be a substring match. When more than one Dialog matches, the caller
+MUST be given every candidate with its numeric `chat_id`; a Dialog Lookup MUST
+NOT choose one. When none matches, the failure MUST name
+`just tg-sync-targets`.
+
+The statement MUST bind every value and MUST NOT be assembled by string
+formatting. Its phone predicate MUST be guarded by both `d.phone IS NOT NULL`
+and a non-empty digits parameter.
+
+**Rationale.** The Persona tools have to work when the Telegram session is dead,
+as `SPEC-SRCH-001` already requires of search. Exact matching is the same rule
+`SPEC-SYNC-006` gives: `an` must not silently pull in Anna, Ivan and Alexander.
+Without both phone guards, a non-numeric Target reduces the phone predicate to
+`'' = ''` for every row storing no phone, and the lookup silently returns the
+entire archive.
+
+**Decided by.** [ADR-0008](../20-architecture/adr/0008-dialog-persona-hybrid-authorship.md).
+**Test.** `tests/test_persona_sql.py` - `test_dialog_lookup_binds_every_value_and_formats_nothing`,
+`test_dialog_lookup_never_matches_every_dialog_on_a_null_phone`,
+`test_dialog_lookup_matches_exactly_never_as_a_substring`,
+`test_dialog_lookup_keys_normalise_a_target`.
+
 ---
 
 ## SYNC - Filling the archive
@@ -298,6 +331,129 @@ therefore makes no cold `ResolveUsername` call (`SPEC-SND-006`).
 `test_matching_is_exact_and_never_a_substring`,
 `test_select_by_targets_reports_what_matched_nothing` and
 `test_select_by_targets_keeps_the_newest_active_dialog_order`.
+
+---
+
+## PSN - Per-Dialog style
+
+### SPEC-PSN-001 - A Dialog Persona survives a resync
+
+**Requirement.** A Dialog Persona MUST be stored in `dialog_personas`, never as
+columns on `dialogs`.
+
+**Rationale.** `_UPSERT_DIALOG_SQL` rewrites every column it names on every
+sync. A Persona stored on `dialogs` would be destroyed by the next
+`just tg-sync`, and it is the only content in this database that a resync
+cannot rebuild.
+**Test.** `tests/test_persona_sql.py::test_persona_table_is_separate_from_dialogs`
+and `test_the_dialog_upsert_still_touches_only_sync_columns`.
+
+### SPEC-PSN-002 - Only the account's own words are analysed, and only as numbers
+
+**Requirement.** Every statement feeding a Style Metric MUST filter
+`is_outgoing`. `persona.analyse_style` MUST return only numbers, timestamps and
+Unicode script names; no message text may appear in a Style Metric, in a
+rendered metric line, or in the stored `metrics` snapshot.
+
+**Rationale.** This is the structural half of `RISK-07`. A Persona is derived
+from chat content and then replayed into a drafting context on every later read,
+so the derived half must be incapable of carrying an instruction, a destination
+or a handle. Restricting the input to the account's own messages keeps the
+counterparty's words out of the analyser.
+**Test.** `tests/test_persona_metrics.py::test_no_metric_output_contains_verbatim_message_text`
+and `test_metrics_depend_on_shape_alone_and_not_on_what_was_written`;
+`tests/test_persona_sql.py::test_statements_reading_messages_are_outgoing_only`.
+
+### SPEC-PSN-003 - The Persona Baseline is frozen
+
+**Requirement.** `dialog_personas.baseline_message_id` MUST be set when a
+Persona is created and MUST NOT be changed by an update. `_UPDATE_PERSONA_SQL`
+MUST NOT name the column. Only `_REBASELINE_PERSONA_SQL` may move it, and only
+forward.
+
+**Rationale.** Every message this server sends is archived with `is_outgoing`
+set and is indistinguishable from one the account owner typed. Without a frozen
+baseline the analysis would re-read its own output, and a Persona would converge
+on a model of the model within a few refreshes - reading as *more* consistent,
+so the drift would be invisible.
+**Decided by.** [ADR-0008](../20-architecture/adr/0008-dialog-persona-hybrid-authorship.md).
+**Test.** `tests/test_persona_sql.py::test_persona_update_never_touches_the_baseline_column`
+and `test_only_the_rebaseline_statement_moves_the_baseline`.
+
+### SPEC-PSN-004 - A stored Persona is never silently replaced
+
+**Requirement.** Creating a Persona MUST use `ON CONFLICT DO NOTHING`.
+`tg_set_dialog_persona` MUST return the existing Persona unchanged unless
+`overwrite` is true.
+
+**Rationale.** A Persona is the only hand-written content in this database and
+the only content a resync cannot reconstruct. Silently replacing one would
+destroy work with no record.
+**Test.** `tests/test_persona_sql.py::test_persona_insert_never_overwrites`.
+
+### SPEC-PSN-005 - Pattern Drift is reported on three axes
+
+**Requirement.** A rendered Persona MUST state its freshness, judged on volume
+(the account's own messages archived since the analysis, counted not
+subtracted), age, and metric drift. A stale verdict MUST name which axis fired.
+Analysis MUST NOT rewrite a stored Persona.
+
+**Rationale.** Volume alone is bounded above by how far the Sync has run, so a
+year-old Persona reports zero new messages - and therefore fresh - on an archive
+nobody has synced. Age catches that; drift catches a style that changed without
+the message count moving. Message ids have gaps from deletions, so a subtraction
+of ids is not a count of messages.
+**Test.** `tests/test_persona_metrics.py::test_stale_verdict_names_which_axis_triggered_it`
+and `test_freshness_is_fresh_when_no_axis_fired`;
+`tests/test_persona_sql.py::test_drift_is_counted_never_subtracted_from_message_ids`.
+
+### SPEC-PSN-006 - Persona text is sanitised, capped and fenced
+
+**Requirement.** Every agent-written Persona field MUST pass
+`safety.sanitise_persona_field` before storage: invisible and control characters
+stripped, all whitespace collapsed to single spaces, and the field refused if it
+contains a URL, an `@handle`, a `tg_` tool name or a `---` fence marker. Python
+caps MUST be strictly tighter than the SQL `CHECK` constraints. Rendered Persona
+text MUST appear inside a constant fence labelling it as data.
+
+**Rationale.** `RISK-07`. Collapsing whitespace means a field cannot span lines
+and so cannot counterfeit the fence. The rejections are structural, not
+semantic: a keyword blacklist rejects honest style descriptions and stops nobody
+who can rephrase. The tighter Python cap means a too-long field produces an
+actionable sentence rather than a raw asyncpg constraint error.
+**Test.** `tests/test_persona_render.py` - the `test_sanitise_*` cases and
+`test_persona_block_is_fenced_and_labelled_as_data`;
+`tests/test_persona_sql.py::test_python_caps_are_strictly_tighter_than_the_sql_checks`.
+
+### SPEC-PSN-007 - The Persona is injected before drafting
+
+**Requirement.** `tg_get_recent_messages` MUST prepend the Dialog's Persona
+block, or a note naming the tools that record one. It MUST key that lookup on
+the `chat_id` of the Peer it has already resolved, never on a second
+resolution. The lookup MUST NOT be able to fail the tool: an unreachable
+archive or an unsynced Peer MUST degrade to one line.
+
+**Rationale.** This is the tool an agent calls immediately before drafting, so
+it is the one place the style constraint is guaranteed to be in context when it
+is needed. Two resolutions in one tool can disagree and describe the wrong
+person. `tg_get_recent_messages` works today with no database at all, and
+prepending a Persona must not change that.
+**Test.** Manual: with PostgreSQL stopped, the tool still returns the
+conversation with `PERSONA: unavailable`. `server.persona_header_for` catches
+every exception.
+
+### SPEC-PSN-008 - A Persona never gates a send
+
+**Requirement.** A missing, stale or unreadable Dialog Persona MUST NOT prevent
+or delay a send. `tg_send_message` MUST read the Archive only after every chunk
+is delivered, only on the success path, and only through a helper that returns
+`""` on any failure.
+
+**Rationale.** The Send Guard must remain the only reason a send is refused. A
+database read that could raise after delivery would report `ERROR:` for a
+message that was actually sent, and the agent would send it again.
+**Test.** `server.persona_hint` swallows every exception; the guard, empty-body
+and exception paths of `tg_send_message` are unchanged.
 
 ---
 

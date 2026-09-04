@@ -28,6 +28,9 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | Configuration | `tests/test_config.py` | `SPEC-SEC-003`, `SPEC-SEC-004` - validation, path rejection, clone naming |
 | Peer filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-001` - who is archived, target normalisation |
 | Target filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-006` - exact matching, dialog ordering, unmatched reporting |
+| Style measurement | `tests/test_persona_metrics.py` | `SPEC-PSN-002`, `SPEC-PSN-003`, `SPEC-PSN-005` - totality over empty input, distributions not means, no message text in any metric, the three freshness axes |
+| Persona SQL | `tests/test_persona_sql.py` | `SPEC-PSN-001`, `-003`, `-004`, `SPEC-SRCH-006` - the frozen baseline, no silent overwrite, outgoing-only reads, Dialog Lookup shape |
+| Persona safety | `tests/test_persona_render.py` | `SPEC-PSN-006`, `RISK-07` - sanitisation, the data fence, ambiguity reported not guessed |
 
 ## What cannot be unit-tested
 
@@ -42,6 +45,10 @@ These need a live account and are verified by hand. Record the result in
 | Targeted sync | `just tg-sync-targets @someone` | Only that dialog is processed; a mistyped target is named in a warning |
 | Sync resumability | Interrupt with Ctrl-C, rerun | Resumes at the cursor, not from zero |
 | Reading is non-destructive | `tg_get_unread_dialogs`, then check the app | Unread badges unchanged |
+| A Persona survives a resync | Store one, then `just tg-sync` | `tg_get_dialog_persona` still returns it (`SPEC-PSN-001`) |
+| A Persona cannot model itself | Draft and send ~20 replies, sync, re-read | `baseline_message_id` and `analysed_count` unchanged; the metrics still describe the user (`SPEC-PSN-003`) |
+| A dead archive cannot break a live read | `just db-down`, then `tg_get_recent_messages` | The conversation still returns, with `PERSONA: unavailable` (`SPEC-PSN-007`) |
+| A dead archive cannot break a send | `just db-down`, then `tg_send_message` to `me` | Sends, no `ERROR:`, no hint appended (`SPEC-PSN-008`) |
 
 ## Writing a new test
 

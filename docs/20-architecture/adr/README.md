@@ -29,3 +29,4 @@ from the [ID registry](../../00-index/id-registry.md).
 | [0005](0005-hard-block-send-to-unknown-peers.md) | Hard-block sends to strangers, with no override flag | Accepted |
 | [0006](0006-raw-sql-asyncpg-no-orm.md) | Raw SQL over asyncpg, no ORM | Accepted |
 | [0007](0007-documentation-governance.md) | Documentation is part of the implementation | Accepted |
+| [0008](0008-dialog-persona-hybrid-authorship.md) | Dialog Persona: hybrid authorship, own table, frozen baseline | Accepted |
