@@ -1,5 +1,9 @@
 # tg-ai
 
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="tg-ai - Personal Telegram MCP Server" width="100%">
+</p>
+
 > [!WARNING]
 > **DISCLAIMER: This tool automates personal Telegram accounts using MTProto. Telegram's anti-spam algorithms are strict. While this project includes safeguards (rate-limiting, strict checks against messaging non-contacts), the author is NOT responsible for any PeerFloodError, temporary limits, or permanent bans applied to your account. Use at your own risk. NEVER share your .session files or API_ID.**
 
