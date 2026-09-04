@@ -1,5 +1,8 @@
 # tg-ai
 
+> [!WARNING]
+> **DISCLAIMER: This tool automates personal Telegram accounts using MTProto. Telegram's anti-spam algorithms are strict. While this project includes safeguards (rate-limiting, strict checks against messaging non-contacts), the author is NOT responsible for any PeerFloodError, temporary limits, or permanent bans applied to your account. Use at your own risk. NEVER share your .session files or API_ID.**
+
 A local MCP server that lets an AI agent drive your **personal** Telegram
 account: send messages as you, read replies, and full-text search your entire
 chat history instantly.
