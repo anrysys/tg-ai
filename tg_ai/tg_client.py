@@ -106,6 +106,62 @@ def normalise_target(target: str) -> str:
     return target.strip().lstrip("@") if target else ""
 
 
+def _digits(value: str) -> str:
+    """Keep only the digits, so ``+380 50 123`` and ``38050123`` compare equal."""
+    return "".join(character for character in value if character.isdigit())
+
+
+def peer_match_keys(user: User) -> set[str]:
+    """Every string a Target may legitimately use to name this Peer.
+
+    Covers the numeric id, the username, the phone number reduced to digits,
+    and the first, last and full name. Names are case-folded and their internal
+    whitespace collapsed, so ``"anna  petrova"`` matches ``"Anna Petrova"``.
+    """
+    keys: set[str] = {str(user.id)}
+
+    if user.username:
+        keys.add(user.username.casefold())
+    if user.phone:
+        keys.add(_digits(user.phone))
+
+    first = (user.first_name or "").strip()
+    last = (user.last_name or "").strip()
+    for name in (first, last, f"{first} {last}".strip()):
+        if name:
+            keys.add(" ".join(name.split()).casefold())
+
+    return keys
+
+
+def target_keys(target: str) -> set[str]:
+    """The keys one Target may match on.
+
+    A digit-bearing target yields its digits-only form as well, so a phone
+    number matches however the user typed the separators.
+    """
+    cleaned = " ".join(normalise_target(target).split()).casefold()
+    if not cleaned:
+        return set()
+
+    keys = {cleaned}
+    digits = _digits(cleaned)
+    if digits:
+        keys.add(digits)
+    return keys
+
+
+def matches_target(user: User, target: str) -> bool:
+    """Whether ``user`` is the Peer named by ``target`` (SPEC-SYNC-006).
+
+    Matching is exact per key, never a substring: ``"an"`` must not silently
+    pull in ``Anna``, ``Ivan`` and ``Alexander`` when the user asked for one
+    person. A target that matches nothing is reported by the caller rather
+    than being widened here.
+    """
+    return bool(peer_match_keys(user) & target_keys(target))
+
+
 @dataclass(slots=True)
 class _Cached:
     value: object

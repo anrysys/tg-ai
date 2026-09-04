@@ -3,7 +3,7 @@ id: DOC-SRS
 title: Software requirements specification
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-PRD, DOC-SAD, DOC-MCP-TOOLS, DOC-QA, DOC-SECURITY]
 ---
 
@@ -265,6 +265,39 @@ starting the next.
 **Rationale.** Dozens of history requests per second is a scripted-account
 signal even though nothing is being sent.
 **Test.** `SYNC_DIALOG_DELAY_SECONDS` awaited in `sync_db.run`.
+
+### SPEC-SYNC-006 - Targeted sync
+
+**Requirement.** `sync_db.py --targets T [T ...]` MUST restrict the run to the
+Dialogs matching those Targets. A Target MUST match a Peer's username (with or
+without `@`), phone number, numeric id, first name, last name or full name,
+case-insensitively and with whitespace collapsed. Matching MUST be exact per
+key, never a substring.
+
+The filter MUST narrow the Dialog list produced by `SPEC-SYNC-001`, never widen
+it: a bot, group, channel or deleted account named as a Target MUST still be
+excluded.
+
+Targets matching no Dialog MUST be reported by name. When **no** Target matches,
+the run MUST exit non-zero rather than reporting a successful empty sync.
+
+`--targets` and `--dialog` are mutually exclusive. `--full`, `--since` and
+`--limit` apply unchanged to a targeted run.
+
+**Rationale.** An account with hundreds of Dialogs accumulates hours of flood
+waits during a full backfill. Archiving the people who matter first makes the
+tool usable on day one. Reporting unmatched Targets matters because a typo is
+otherwise indistinguishable from a person having no Dialog, and the user would
+wait for a sync that was never going to include them. Substring matching is
+rejected because `an` would silently pull in every Anna, Ivan and Alexander.
+
+Unlike `--dialog`, the filter selects from Dialogs the account already has and
+therefore makes no cold `ResolveUsername` call (`SPEC-SND-006`).
+
+**Test.** `tests/test_peer_rules.py` - the target-filtering block, in particular
+`test_matching_is_exact_and_never_a_substring`,
+`test_select_by_targets_reports_what_matched_nothing` and
+`test_select_by_targets_keeps_the_newest_active_dialog_order`.
 
 ---
 

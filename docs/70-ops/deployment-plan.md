@@ -3,7 +3,7 @@ id: DOC-DEPLOY
 title: Deployment plan
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-SAD, DOC-SECURITY, DOC-RUNBOOK-INDEX]
 ---
 
@@ -83,12 +83,27 @@ git status --porcelain             # must not list the session file
 
 ### 5. Fill the archive
 
+On an account with hundreds of dialogs, archive the people who matter first:
+
+```bash
+just tg-sync-targets @anna @bob "Anna Petrova" +380501234567
+```
+
+Each target matches a username (with or without `@`), a phone number, a numeric
+id, or a first, last or full name. Anything that matches no dialog is named in a
+warning, so a typo is visible immediately rather than looking like a person with
+no history. Search over those people works as soon as this finishes.
+
+Then let the rest follow:
+
 ```bash
 just tg-sync-full
 ```
 
 Hours on a busy account, and it will pause on flood waits. Safe to interrupt:
-progress is saved per dialog and `just tg-sync` resumes from the cursor.
+progress is saved per dialog and `just tg-sync` resumes from the cursor. Because
+insertion is idempotent (`SPEC-SYNC-002`), the dialogs already covered by the
+targeted run cost nothing the second time.
 
 Afterwards, keep it fresh with plain `just tg-sync` - incremental, minutes.
 
@@ -136,6 +151,7 @@ session path, `Database: reachable`, and non-zero archive counts.
 | Task | Command | When |
 | --- | --- | --- |
 | Refresh the archive | `just tg-sync` | Daily, or before a broad search |
+| Archive specific people first | `just tg-sync-targets @a @b` | On a large account, before the full backfill |
 | Restart the database | `just db-up` | After a reboot |
 | Full check | `just check` | Before reporting any code change done |
 

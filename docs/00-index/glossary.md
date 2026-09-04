@@ -3,7 +3,7 @@ id: DOC-GLOSSARY
 title: Glossary
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-ROUTER, DOC-SRS, DOC-DATA-MODEL]
 ---
 
@@ -20,6 +20,7 @@ function or document section `Chat`, `Conversation` or `Thread`.
 | **Peer** | Any Telegram entity a message can be addressed to. In this project a Peer is always a `User`; groups and channels are out of scope. | `tg_client.resolve_peer` |
 | **Dialog** | One 1-on-1 conversation with a Peer, and the archive row describing it. Never "chat", never "conversation". | `dialogs` table, `PeerIndex` |
 | **Target** | The user-supplied reference to a Peer: `@username`, phone number, numeric id, or `me`. Normalised by `normalise_target`. | every tool's `target` parameter |
+| **Target Filter** | The set of Targets passed to `sync_db.py --targets`, restricting a Sync to named people. Narrows the Dialog list; never widens it, so it cannot reach a bot, group or deleted account that `SPEC-SYNC-001` already excluded. | `sync_db.select_by_targets` |
 | **Archive** | The local PostgreSQL copy of message history. Distinct from Telegram itself, which is always called "the live account". | `tg_ai/db.py` |
 | **Sync** | The process of copying messages from the live account into the Archive. | `sync_db.py` |
 | **Sync Cursor** | `dialogs.last_synced_message_id` - the highest message id already archived for a Dialog. Advanced only after a commit, so it is always safe to resume from. | `db.advance_cursor` |

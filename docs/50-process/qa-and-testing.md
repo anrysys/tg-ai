@@ -3,7 +3,7 @@ id: DOC-QA
 title: QA and testing
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-SRS, DOC-DOCS-PROTOCOL]
 ---
 
@@ -27,6 +27,7 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | Search SQL | `tests/test_search_sql.py` | `SPEC-SRCH-002`, `-003`, `-004` - strategies, `simple`, bound parameters |
 | Configuration | `tests/test_config.py` | `SPEC-SEC-003`, `SPEC-SEC-004` - validation, path rejection, clone naming |
 | Peer filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-001` - who is archived, target normalisation |
+| Target filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-006` - exact matching, dialog ordering, unmatched reporting |
 
 ## What cannot be unit-tested
 
@@ -38,6 +39,7 @@ These need a live account and are verified by hand. Record the result in
 | Send guard actually blocks | `tg_send_message` to a never-contacted account | `WARNING`, and the Telegram app shows nothing sent |
 | Chunking end to end | Send 5000 characters to `me` | 2 messages, ~2.5s apart, no broken word |
 | Sync idempotency | Run the same `--dialog --limit` twice | Second run reports `+0 msgs` |
+| Targeted sync | `just tg-sync-targets @someone` | Only that dialog is processed; a mistyped target is named in a warning |
 | Sync resumability | Interrupt with Ctrl-C, rerun | Resumes at the cursor, not from zero |
 | Reading is non-destructive | `tg_get_unread_dialogs`, then check the app | Unread badges unchanged |
 

@@ -58,6 +58,10 @@ tg-sync *ARGS:
 tg-sync-full *ARGS:
     {{ python }} sync_db.py --full {{ ARGS }}
 
+# Sync only named people (@username, phone, id or name) - the fast first backfill.
+tg-sync-targets +TARGETS:
+    {{ python }} sync_db.py --targets {{ TARGETS }}
+
 # Run the MCP server in the foreground (smoke test only; agents spawn it).
 tg-serve:
     {{ python }} server.py

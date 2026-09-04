@@ -3,7 +3,7 @@ id: DOC-RB-RESYNC
 title: "Runbook: archive is stale, empty or unreachable"
 status: active
 authority: derived
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-DEPLOY, DOC-DATA-MODEL]
 ---
 
@@ -62,6 +62,28 @@ just tg-sync -- --dialog @someone --full
 
 `--full` ignores the cursor for that dialog and walks it from the beginning.
 Existing rows are not duplicated.
+
+## A full backfill is taking too long
+
+Expected on an account with hundreds of dialogs: every dialog costs API calls
+and the run pauses on flood waits.
+
+Interrupt it and archive the people you actually need first:
+
+```bash
+just tg-sync-targets @anna @bob "Anna Petrova"
+```
+
+Then restart the full run in the background. Cursors and idempotency mean
+nothing already archived is fetched twice (`SPEC-SYNC-002`, `SPEC-SYNC-003`).
+
+If a target is reported as unmatched, either it is a typo or you have no dialog
+with that person. For someone you have never messaged, use `--dialog`, which
+resolves through the API:
+
+```bash
+just tg-sync -- --dialog @newperson
+```
 
 ## Rebuilding from scratch
 

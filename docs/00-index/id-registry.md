@@ -3,7 +3,7 @@ id: DOC-ID-REGISTRY
 title: Identifier registry
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-ROUTER, DOC-SRS, DOC-ADR-INDEX]
 ---
 
@@ -39,8 +39,8 @@ one at the moment you write the thing, and record it here in the same change.
 | `SPEC-SND-001` .. `SPEC-SND-006` | In use |
 | `SPEC-RCV-001` .. `SPEC-RCV-004` | In use |
 | `SPEC-SRCH-001` .. `SPEC-SRCH-005` | In use |
-| `SPEC-SYNC-001` .. `SPEC-SYNC-005` | In use |
+| `SPEC-SYNC-001` .. `SPEC-SYNC-006` | In use |
 | `SPEC-SEC-001` .. `SPEC-SEC-005` | In use |
 | `ADR-0000` .. `ADR-0007` | In use (`0000` is the template) |
 | `RISK-01` .. `RISK-06` | In use |
-| `TASK-001` .. `TASK-008` | In use |
+| `TASK-001` .. `TASK-009` | In use |

@@ -3,7 +3,7 @@ id: DOC-SAD
 title: Software architecture
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-SRS, DOC-DATA-MODEL, DOC-ADR-INDEX, DOC-DEPLOY]
 ---
 
@@ -69,6 +69,28 @@ Telethon stores its session in SQLite. Two processes writing one file produce
 the same, so Telegram sees one account with two connections - which it
 permits - while the two processes never contend for the file
 ([ADR-0004](adr/0004-session-file-clone-for-sync.md)).
+
+## Selecting what to sync
+
+A full backfill walks every private Dialog. On an account with hundreds of them
+that is hours of work punctuated by flood waits, and the conversations the user
+actually cares about may be archived last.
+
+Three selection modes exist, in increasing cost:
+
+| Mode | Selects | API cost |
+| --- | --- | --- |
+| `--targets T [T ...]` | Dialogs matching the named people | The dialog list only. No peer resolution |
+| default / `--full` | Every archivable private Dialog | The dialog list only |
+| `--dialog T` | One peer, resolved through the API | A cold `ResolveUsername` if the peer is unknown |
+
+`--targets` filters the list `SPEC-SYNC-001` already produced, so it can only
+narrow that list - a bot or channel named as a target stays excluded. It is the
+intended first step on a large account: archive the people who matter, then let
+a plain `just tg-sync` catch up with the rest in the background.
+
+`--dialog` is the escape hatch for someone the account has no Dialog with yet,
+and is the only mode that resolves a peer through the API.
 
 ## Why the archive is separate from the live account
 

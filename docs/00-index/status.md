@@ -3,7 +3,7 @@ id: DOC-STATUS
 title: Project status
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-ROADMAP, DOC-TASK-QUEUE]
 ---
 
@@ -23,7 +23,7 @@ real Telegram account** - that is M5, and it requires the user.
 | Safety primitives | Done. 53 offline tests passing |
 | Database schema and access | Done. Verified live against PostgreSQL 16 |
 | `auth.py` | Written, **never executed** - needs real credentials |
-| `sync_db.py` | Written, **never executed against Telegram** |
+| `sync_db.py` | Written, **never executed against Telegram**. Supports `--targets` for a partial first backfill |
 | `server.py` | Done. Verified over a real MCP stdio session |
 | Documentation base | Done |
 
@@ -31,7 +31,7 @@ real Telegram account** - that is M5, and it requires the user.
 
 Empirically, on this machine:
 
-- 53 offline tests pass; `ruff` and `black` clean.
+- 64 offline tests pass; `ruff` and `black` clean.
 - PostgreSQL 16 on `127.0.0.1:5434` is healthy; `sql/schema.sql` applies cleanly.
 - Idempotency: re-inserting the same messages added **0** rows.
 - Cursor monotonicity: advancing to a lower id left the cursor at its higher value.
@@ -42,6 +42,9 @@ Empirically, on this machine:
   `server.py` over stdio. All six tools registered with correct schemas, and
   stdout carried protocol traffic only.
 - `markdownlint-cli2`: 0 issues across 49 markdown files.
+- Target filtering verified against a stubbed dialog list: correct selection,
+  dialog order preserved, unmatched targets warned about, and a bot named as a
+  target still excluded by `SPEC-SYNC-001`.
 - Tests are independent of the developer's local `.env` (proven by running the
   suite with and without the file present).
 - Graceful degradation: with no session file **and no API credentials**,

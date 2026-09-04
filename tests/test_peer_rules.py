@@ -1,12 +1,19 @@
-"""Which peers are archived, and how targets are normalised.
+"""Which peers are archived, how targets are normalised, and target filtering.
 
-Proves SPEC-SYNC-001.
+Proves SPEC-SYNC-001 and SPEC-SYNC-006.
 """
 
 import pytest
 from telethon.tl.types import Channel, User
 
-from tg_ai.tg_client import display_name, is_archivable, normalise_target, peer_label
+from sync_db import select_by_targets
+from tg_ai.tg_client import (
+    display_name,
+    is_archivable,
+    matches_target,
+    normalise_target,
+    peer_label,
+)
 
 
 def make_user(**kwargs) -> User:
@@ -70,3 +77,83 @@ def test_a_user_always_gets_a_non_empty_label():
 def test_the_label_includes_the_username_when_there_is_a_name():
     assert peer_label(make_user()) == "Ann (@ann)"
     assert peer_label(make_user(first_name=None, last_name=None)) == "@ann"
+
+
+# --- Target filtering (SPEC-SYNC-006) -------------------------------------
+
+
+def test_a_target_matches_a_username_with_or_without_the_at_sign():
+    user = make_user(username="anna_p")
+    assert matches_target(user, "@anna_p")
+    assert matches_target(user, "anna_p")
+
+
+def test_target_matching_is_case_insensitive():
+    assert matches_target(make_user(username="anna_p"), "ANNA_P")
+    assert matches_target(make_user(first_name="Anna"), "anna")
+
+
+def test_a_target_matches_a_first_last_or_full_name():
+    user = make_user(first_name="Anna", last_name="Petrova", username=None)
+    assert matches_target(user, "Anna")
+    assert matches_target(user, "Petrova")
+    assert matches_target(user, "Anna Petrova")
+    # Collapsed whitespace, so a typed double space still matches.
+    assert matches_target(user, "Anna  Petrova")
+
+
+def test_a_target_matches_a_phone_however_it_is_punctuated():
+    user = make_user(phone="380501234567")
+    assert matches_target(user, "+380501234567")
+    assert matches_target(user, "+380 50 123 4567")
+    assert matches_target(user, "380501234567")
+
+
+def test_a_target_matches_a_numeric_id():
+    assert matches_target(make_user(id=555), "555")
+
+
+def test_matching_is_exact_and_never_a_substring():
+    # "an" must not pull in every Anna, Ivan and Alexander when the user asked
+    # for one person.
+    user = make_user(first_name="Anna", last_name="Petrova", username="anna_p")
+    assert not matches_target(user, "an")
+    assert not matches_target(user, "anna_")
+    assert not matches_target(user, "petrov")
+
+
+def test_an_empty_target_matches_nobody():
+    assert not matches_target(make_user(), "")
+    assert not matches_target(make_user(), "   ")
+
+
+def test_select_by_targets_keeps_the_newest_active_dialog_order():
+    users = [
+        make_user(id=1, first_name="Ann", username="ann"),
+        make_user(id=2, first_name="Bob", username="bob"),
+        make_user(id=3, first_name="Cid", username="cid"),
+    ]
+    # Targets given in a different order than the dialog list.
+    selected, unmatched = select_by_targets(users, ["cid", "ann"])
+    assert [user.id for user in selected] == [1, 3]
+    assert unmatched == []
+
+
+def test_select_by_targets_reports_what_matched_nothing():
+    users = [make_user(id=1, username="ann")]
+    selected, unmatched = select_by_targets(users, ["ann", "nosuchperson"])
+    assert [user.id for user in selected] == [1]
+    assert unmatched == ["nosuchperson"]
+
+
+def test_select_by_targets_never_returns_a_duplicate():
+    user = make_user(id=1, first_name="Ann", username="ann")
+    # Two targets naming the same person.
+    selected, _ = select_by_targets([user], ["ann", "Ann"])
+    assert len(selected) == 1
+
+
+def test_select_by_targets_with_no_match_selects_nothing():
+    selected, unmatched = select_by_targets([make_user(id=1, username="ann")], ["zzz"])
+    assert selected == []
+    assert unmatched == ["zzz"]

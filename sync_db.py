@@ -9,9 +9,14 @@ The sync is resumable. Each dialog carries a cursor
 committed, so an interrupted or flood-waited run continues where it stopped
 rather than starting over (SPEC-SYNC-003).
 
+A full run walks every private dialog, which on an account with hundreds of
+them is slow and accumulates flood waits. ``--targets`` restricts the run to a
+named set of people so the ones that matter are archived first (SPEC-SYNC-006).
+
 Usage:
     just tg-sync-full                      # first run: everything
     just tg-sync                           # afterwards: only what is new
+    just tg-sync-targets @anna @bob        # only these people
     just tg-sync -- --dialog @someone --limit 200
 """
 
@@ -36,6 +41,7 @@ from tg_ai.tg_client import (
     build_client,
     clone_session,
     is_archivable,
+    matches_target,
     peer_label,
     resolve_peer,
 )
@@ -56,10 +62,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Ignore the stored cursors and walk every dialog from its first message.",
     )
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--dialog",
         metavar="TARGET",
-        help="Sync only this peer (@username, phone or numeric id).",
+        help=(
+            "Sync only this peer (@username, phone or numeric id). Resolves "
+            "through the Telegram API, so it reaches a peer with no dialog yet."
+        ),
+    )
+    selection.add_argument(
+        "--targets",
+        nargs="+",
+        metavar="TARGET",
+        help=(
+            "Sync only these people. Each target matches a username (with or "
+            "without @), a phone number, a numeric id, or a first, last or "
+            "full name. Filters the existing dialog list, so no peer is "
+            "resolved through the API. Targets that match nothing are reported."
+        ),
     )
     parser.add_argument("--limit", type=int, help="Stop after this many messages per dialog.")
     parser.add_argument(
@@ -160,10 +181,48 @@ async def sync_dialog(
     return added, cursor
 
 
+def select_by_targets(users: list[User], targets: list[str]) -> tuple[list[User], list[str]]:
+    """Filter archivable dialogs down to the requested people (SPEC-SYNC-006).
+
+    Returns:
+        ``(selected, unmatched)`` - the dialogs to sync, in their original
+        newest-active order, and the targets that matched nothing. Unmatched
+        targets are returned rather than ignored because a typo would otherwise
+        look identical to a person having no dialog, and the user would wait
+        for a sync that was never going to include them.
+    """
+    selected: list[User] = []
+    unmatched: list[str] = []
+
+    for target in targets:
+        hits = [user for user in users if matches_target(user, target)]
+        if not hits:
+            unmatched.append(target)
+            continue
+        for user in hits:
+            if user not in selected:
+                selected.append(user)
+
+    # Preserve the newest-active ordering of the dialog list rather than the
+    # order the targets happened to be typed in.
+    order = {id(user): position for position, user in enumerate(users)}
+    selected.sort(key=lambda user: order[id(user)])
+    return selected, unmatched
+
+
 async def collect_targets(
-    client: TelegramClient, index: PeerIndex, config: Config, only: str | None
+    client: TelegramClient,
+    index: PeerIndex,
+    config: Config,
+    only: str | None,
+    targets: list[str] | None = None,
 ) -> list[User]:
-    """Return the dialogs to sync, newest-active first."""
+    """Return the dialogs to sync, newest-active first.
+
+    ``only`` resolves one peer through the API. ``targets`` filters the
+    account's existing dialogs, which costs no cold ``ResolveUsername`` call
+    (SPEC-SND-006) and is the fast path for a first, partial backfill.
+    """
     if only:
         user, _ = await resolve_peer(client, index, only)
         return [user]
@@ -173,7 +232,18 @@ async def collect_targets(
         entity = dialog.entity
         if is_archivable(entity, include_bots=config.sync_include_bots):
             users.append(entity)
-    return users
+
+    if not targets:
+        return users
+
+    selected, unmatched = select_by_targets(users, targets)
+    if unmatched:
+        log.warning(
+            "No private dialog matched: %s. Check the spelling, or use "
+            "--dialog to reach someone you have never messaged.",
+            ", ".join(unmatched),
+        )
+    return selected
 
 
 async def run(args: argparse.Namespace, config: Config) -> int:
@@ -194,7 +264,10 @@ async def run(args: argparse.Namespace, config: Config) -> int:
         log.info("Syncing history for %s", peer_label(me))
 
         index = PeerIndex(client)
-        targets = await collect_targets(client, index, config, args.dialog)
+        targets = await collect_targets(client, index, config, args.dialog, args.targets)
+        if args.targets and not targets:
+            log.error("None of the requested targets has a private dialog. Nothing to sync.")
+            return 1
         contact_ids = await index.contact_ids()
         log.info("%d private dialog(s) to process", len(targets))
 

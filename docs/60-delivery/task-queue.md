@@ -3,7 +3,7 @@ id: DOC-TASK-QUEUE
 title: Task queue
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-ROADMAP, DOC-STATUS]
 ---
 
@@ -38,3 +38,4 @@ Do not pick a default for these. Ask the user.
 | TASK-004 | `auth.py` and the session-clone strategy | M1, M2, [ADR-0004](../20-architecture/adr/0004-session-file-clone-for-sync.md) |
 | TASK-005 | `sync_db.py` with resumable cursors and flood handling | M2 |
 | TASK-006 | MCP server with six tools and the Send Guard | M3, [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md) |
+| TASK-009 | Targeted sync (`--targets`, `just tg-sync-targets`) to avoid hours of flood waits on a large account | `SPEC-SYNC-006` |

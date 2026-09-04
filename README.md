@@ -63,9 +63,23 @@ just setup                       # venv + dependencies + .env
 $EDITOR .env                     # set TG_API_ID and TG_API_HASH
 just db-up                       # PostgreSQL on 127.0.0.1:5434
 just tg-auth                     # interactive login: phone, SMS code, 2FA
-just tg-sync-full                # download history (hours; resumable)
+just tg-sync-targets @anna @bob  # archive the people who matter first (fast)
+just tg-sync-full                # then the rest (hours; resumable)
 just mcp-add                     # register with Claude Code
 ```
+
+On an account with hundreds of dialogs a full backfill takes hours and pauses on
+Telegram rate limits. `just tg-sync-targets` archives only the people you name,
+so search over those conversations works within minutes. Each target matches a
+username (with or without `@`), a phone number, a numeric id, or a first, last or
+full name; anything matching no dialog is reported so a typo is obvious:
+
+```bash
+just tg-sync-targets @anna "Anna Petrova" +380501234567
+```
+
+Running `just tg-sync-full` afterwards costs nothing for the dialogs already
+archived - insertion is idempotent.
 
 Get `TG_API_ID` and `TG_API_HASH` at <https://my.telegram.org> → API development
 tools.
@@ -114,6 +128,7 @@ Architecture: [docs/20-architecture/sad.md](docs/20-architecture/sad.md).
 just              # list everything
 just check        # ruff + black + pytest + docs checks
 just tg-sync      # refresh the archive (incremental)
+just tg-sync-targets @anna @bob   # archive only these people
 just tg-status    # account, session, database, archive health
 just db-psql      # psql shell into the archive
 ```
