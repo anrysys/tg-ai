@@ -164,5 +164,5 @@ session clone ([ADR-0004](../20-architecture/adr/0004-session-file-clone-for-syn
 | --- | --- |
 | The MCP registration | `just mcp-remove` |
 | The database, keeping data | `just db-down` |
-| The database and all archived history | `docker compose down -v` - irreversible |
+| The database and all archived history | `just db-reset` - prints what will be lost and requires typing `DELETE` on a terminal. `docker compose down -v` does the same thing with no warning at all |
 | The Telegram login | Delete `*.session`, and terminate the session in the Telegram app |

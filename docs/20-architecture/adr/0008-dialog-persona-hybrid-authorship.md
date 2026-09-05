@@ -85,7 +85,8 @@ Never let any of it gate a send.
   to `dialog_personas` and nothing else; `dialogs` and `messages` stay owned by
   `sync_db.py`. The [SAD](../sad.md) diagram reflects this.
 - `dialog_personas` holds the only rows in this database that a resync cannot
-  rebuild. `just db-reset` destroys them silently - noted in the
+  rebuild. That is why `just db-reset` now prints what it is about to destroy
+  and requires typing `DELETE` on a terminal; the backup command is in the
   [resync runbook](../../70-ops/runbooks/resync-archive.md).
 - A new risk class exists and is recorded as `RISK-07`: unlike `RISK-06`, which
   is transient and per-turn, a Persona persists and is re-injected on every read.

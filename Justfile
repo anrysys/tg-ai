@@ -38,8 +38,60 @@ db-psql:
 db-schema:
     docker exec -i tg-ai-postgres psql -U tgai -d tgai -v ON_ERROR_STOP=1 < sql/schema.sql
 
-# DESTRUCTIVE: drop the archive volume and recreate it empty.
+# DESTRUCTIVE: drop the archive volume and recreate it empty. Asks first.
 db-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Report what is about to be lost before asking, rather than after. The
+    # counts come from the live database when it is reachable; "unknown" when
+    # it is not, which is itself worth seeing before dropping a volume.
+    count() {
+        docker exec tg-ai-postgres psql -U tgai -d tgai -tAX \
+            -c "SELECT count(*) FROM $1" 2>/dev/null || echo "unknown"
+    }
+
+    messages="unknown"; dialogs="unknown"; personas="unknown"
+    if docker exec tg-ai-postgres pg_isready -U tgai -d tgai >/dev/null 2>&1; then
+        messages=$(count messages)
+        dialogs=$(count dialogs)
+        personas=$(count dialog_personas)
+    fi
+
+    cat >&2 <<EOF
+
+      DESTRUCTIVE: this drops the PostgreSQL volume and recreates it empty.
+
+      About to be deleted:
+        messages          ${messages}
+        dialogs           ${dialogs}
+        dialog personas   ${personas}
+
+      Messages and dialogs can be pulled from Telegram again with
+      \`just tg-sync-full\`, slowly. Dialog personas CANNOT: a person wrote
+      them and Telegram has never seen them. To keep them, abort and run:
+
+        docker exec tg-ai-postgres pg_dump -U tgai -d tgai \\
+          -t dialog_personas --data-only > dialog_personas.sql
+
+      Restoring is in docs/70-ops/runbooks/resync-archive.md.
+
+    EOF
+
+    # No terminal means nobody is there to consent, so this must not proceed -
+    # a piped "DELETE" is not a decision, and CI must never reach the drop.
+    if [ ! -t 0 ]; then
+        echo "  Aborted: db-reset needs an interactive terminal to confirm." >&2
+        exit 1
+    fi
+
+    printf '  Type DELETE to proceed, anything else to abort: ' >&2
+    read -r reply || reply=""
+    if [ "${reply}" != "DELETE" ]; then
+        echo "  Aborted. Nothing was changed." >&2
+        exit 1
+    fi
+
     docker compose down -v
     just db-up
     just db-schema

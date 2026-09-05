@@ -91,7 +91,7 @@ Only when the schema changed incompatibly. **Destroys all archived history** and
 requires a full re-download:
 
 ```bash
-just db-reset       # drops the volume, recreates it, applies sql/schema.sql
+just db-reset       # asks first, then drops the volume and reapplies the schema
 just tg-sync-full
 ```
 
@@ -111,8 +111,10 @@ SELECT username, last_synced_message_id, synced_at FROM dialogs ORDER BY synced_
 Everything in `dialogs` and `messages` comes back from Telegram. `dialog_personas`
 does not - a person wrote those rows, and Telegram has never seen them.
 
-`just db-reset` drops the volume and destroys them **silently**. Before running
-it, save them:
+`just db-reset` drops the volume and destroys them. It prints what is about to
+be lost and refuses to continue until you type `DELETE`, so it cannot happen by
+accident - but `docker compose down -v` on its own has no such guard. Either
+way, save them first:
 
 ```bash
 docker exec tg-ai-postgres pg_dump -U tgai -d tgai -t dialog_personas --data-only \
