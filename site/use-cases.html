@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tg-ai use cases: 40 things you can stop doing by hand</title>
+<meta name="description" content="Forty worked scenarios with copy-paste prompts for the tg-ai Telegram MCP server: instant search across years of chat history, inbox triage without opening Telegram, reports sent from your terminal, and replies drafted in your own voice.">
+<link rel="canonical" href="https://anrysys.github.io/tg-ai/use-cases.html">
+<meta name="author" content="anrysys">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="tg-ai">
+<meta property="og:title" content="tg-ai use cases: 40 things you can stop doing by hand">
+<meta property="og:description" content="Forty worked scenarios with copy-paste prompts for the tg-ai Telegram MCP server: instant search across years of chat history, inbox triage without opening Telegram, reports sent from your terminal, and replies drafted in your own voice.">
+<meta property="og:url" content="https://anrysys.github.io/tg-ai/use-cases.html">
+<meta property="og:image" content="https://anrysys.github.io/tg-ai/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="tg-ai use cases: 40 things you can stop doing by hand">
+<meta name="twitter:description" content="Forty worked scenarios with copy-paste prompts for the tg-ai Telegram MCP server: instant search across years of chat history, inbox triage without opening Telegram, reports sent from your terminal, and replies drafted in your own voice.">
+<meta name="twitter:image" content="https://anrysys.github.io/tg-ai/og.png">
+<link rel="alternate" type="text/plain" href="https://anrysys.github.io/tg-ai/llms.txt" title="llms.txt">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://anrysys.github.io/tg-ai/#website",
+      "url": "https://anrysys.github.io/tg-ai/",
+      "name": "tg-ai",
+      "description": "Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.",
+      "inLanguage": "en"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://anrysys.github.io/tg-ai/use-cases.html#webpage",
+      "url": "https://anrysys.github.io/tg-ai/use-cases.html",
+      "name": "tg-ai use cases: 40 things you can stop doing by hand",
+      "description": "Forty worked scenarios with copy-paste prompts for the tg-ai Telegram MCP server: instant search across years of chat history, inbox triage without opening Telegram, reports sent from your terminal, and replies drafted in your own voice.",
+      "isPartOf": {
+        "@id": "https://anrysys.github.io/tg-ai/#website"
+      },
+      "inLanguage": "en"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "tg-ai",
+          "item": "https://anrysys.github.io/tg-ai/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Use cases",
+          "item": "https://anrysys.github.io/tg-ai/use-cases.html"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<style>:root{color-scheme:light dark;--bg:#ffffff;--fg:#1a1d23;--muted:#5b6472;--line:#e3e7ed;
+--accent:#2563eb;--code-bg:#f5f7fa;--card:#f9fafb;--warn-bg:#fff8e6;--warn-line:#e0a800}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9aa7b6;
+--line:#252b33;--accent:#6ea8ff;--code-bg:#161b22;--card:#11161d;--warn-bg:#2a2110;--warn-line:#7a5c00}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+-webkit-text-size-adjust:100%}
+.skip{position:absolute;left:-9999px}.skip:focus{left:8px;top:8px;background:var(--accent);
+color:#fff;padding:8px 12px;border-radius:6px;z-index:10}
+.topbar{position:sticky;top:0;background:color-mix(in srgb,var(--bg) 92%,transparent);
+backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:5}
+.topbar nav{max-width:860px;margin:0 auto;padding:12px 20px;display:flex;gap:20px;
+align-items:center;flex-wrap:wrap;font-size:14px}
+.topbar a{color:var(--muted);text-decoration:none}.topbar a:hover{color:var(--accent)}
+.topbar .brand{font-weight:700;color:var(--fg);font-size:16px;letter-spacing:.5px}
+main{max-width:860px;margin:0 auto;padding:32px 20px 64px}
+h1,h2,h3,h4{line-height:1.25;margin:1.8em 0 .6em;scroll-margin-top:70px}
+h1{font-size:2.1rem;margin-top:.4em;letter-spacing:-.02em}
+h2{font-size:1.5rem;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+h3{font-size:1.17rem}
+h1 .anchor,h2 .anchor,h3 .anchor,h4 .anchor{float:left;margin-left:-.8em;padding-right:.3em;
+color:var(--line);text-decoration:none;opacity:0}
+h1:hover .anchor,h2:hover .anchor,h3:hover .anchor,h4:hover .anchor{opacity:1}
+p{margin:0 0 1em}
+a{color:var(--accent)}
+img{max-width:100%;height:auto}
+code{background:var(--code-bg);padding:.15em .4em;border-radius:4px;
+font:0.87em/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;
+padding:14px 16px;overflow-x:auto;margin:0 0 1.2em}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+.table-wrap{overflow-x:auto;margin:0 0 1.4em;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--card);font-weight:600;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+blockquote.quote{margin:0 0 1.3em;padding:12px 18px;border-left:3px solid var(--line);
+background:var(--card);border-radius:0 8px 8px 0;color:var(--muted)}
+blockquote.quote p:last-child{margin-bottom:0}
+blockquote.alert-warning{background:var(--warn-bg);border-left-color:var(--warn-line);color:var(--fg)}
+.alert-label{font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:.75rem;
+margin:0 0 .4em}
+ul,ol{margin:0 0 1.2em;padding-left:1.4em}li{margin:.3em 0}
+hr{border:none;border-top:1px solid var(--line);margin:2.4em 0}
+details{border:1px solid var(--line);border-radius:8px;padding:10px 16px;margin:0 0 .7em;
+background:var(--card)}
+details[open]{padding-bottom:4px}
+summary{cursor:pointer;font-weight:600;margin:-2px 0}
+footer{border-top:1px solid var(--line);padding:24px 20px 48px;text-align:center;
+color:var(--muted);font-size:.86rem}
+footer a{color:var(--muted)}
+@media(max-width:600px){main{padding:20px 16px 48px}h1{font-size:1.7rem}h2{font-size:1.3rem}}</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+  <nav>
+    <a class="brand" href="./">tg-ai</a>
+    <a href="./">Overview</a>
+    <a href="use-cases.html">Use cases</a>
+    <a href="https://github.com/anrysys/tg-ai" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/anrysys/tg-ai/blob/main/docs/README.md" target="_blank" rel="noopener">Docs</a>
+  </nav>
+</header>
+<main id="content">
+<h1 id="tg-ai-use-cases-40-things-you-can-stop-doing-by-hand"><a class="anchor" href="#tg-ai-use-cases-40-things-you-can-stop-doing-by-hand">#</a>tg-ai use cases: 40 things you can stop doing by hand</h1>
+<p align="center">
+<img src="assets/logo.svg" alt="tg-ai - Telegram MCP server for AI agents" width="100%">
+</p>
+<p>Every scenario below is a real prompt you can paste into Claude Code, Cursor, Antigravity, Codex, Windsurf or any other MCP client once <a href="index.html#install-in-your-ai-client">tg-ai is installed</a>. Each one names the tools it uses, so you can see exactly what your agent is doing on your behalf.</p>
+<p><strong><a href="https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/USE-CASES.md" target="_blank" rel="noopener">Read this page in Russian</a></strong> · <a href="index.html">Back to the README</a></p>
+<blockquote class="quote"><p><strong>A note on honesty.</strong> Everything here maps to one of the <a href="index.html#the-nine-tools">nine tools</a> that actually exist. There are no invented benchmarks and no testimonials on this page. Where something is impossible today, it says so - see <a href="#what-tg-ai-cannot-do">What tg-ai cannot do</a>.</p></blockquote>
+<hr>
+<h2 id="contents"><a class="anchor" href="#contents">#</a>Contents</h2>
+<ol><li><a href="#1-your-searchable-memory">Your searchable memory</a> - stop scrolling, start querying</li><li><a href="#2-inbox-triage-without-opening-telegram">Inbox triage without opening Telegram</a></li><li><a href="#3-reporting-from-your-terminal">Reporting from your terminal</a></li><li><a href="#4-writing-in-your-own-voice">Writing in your own voice</a></li><li><a href="#5-chained-and-autonomous-workflows">Chained and autonomous workflows</a></li><li><a href="#6-life-admin-and-relationships">Life admin and relationships</a></li><li><a href="#what-tg-ai-cannot-do">What tg-ai cannot do</a></li><li><a href="#faq">FAQ</a></li></ol>
+<hr>
+<h2 id="1-your-searchable-memory"><a class="anchor" href="#1-your-searchable-memory">#</a>1. Your searchable memory</h2>
+<p>Telegram's own search is one chat at a time, network-bound, rate-limited, and useless for a partial word. Your archive is a local PostgreSQL database with full-text and trigram indexes. Queries return in milliseconds, cost nothing, and touch no Telegram server - so there is no rate limit and no ban risk, ever.</p>
+<p>This is the group that changes how you work first.</p>
+<h3 id="11-recover-the-config-someone-sent-you-six-months-ago"><a class="anchor" href="#11-recover-the-config-someone-sent-you-six-months-ago">#</a>1.1 Recover the config someone sent you six months ago</h3>
+<p>You know a colleague sent the staging IP. You do not know when. Scrolling Telegram search on a phone, one chat at a time, is fifteen minutes you never get back - and you will do it again next week.</p>
+<pre><code class="language-text">Find the IP address of the new test server that @vasya sent me last month
+and write it into .env</code></pre>
+<p><code>tg_search_local_history</code> runs one indexed query and returns instantly. The agent reads the value out of the message and edits the file itself. You never opened Telegram.</p>
+<h3 id="12-find-the-address-before-you-are-already-late"><a class="anchor" href="#12-find-the-address-before-you-are-already-late">#</a>1.2 Find the address before you are already late</h3>
+<pre><code class="language-text">Find the address Anna sent me for Friday&#x27;s meeting</code></pre>
+<p>The classic: the address exists, in a chat, somewhere above three months of memes. One query, one line back, timestamped.</p>
+<h3 id="13-settle-what-did-we-actually-agree"><a class="anchor" href="#13-settle-what-did-we-actually-agree">#</a>1.3 Settle "what did we actually agree?"</h3>
+<pre><code class="language-text">Search my history with @client for everything about the price and the deadline,
+and give me a timeline of what was agreed and when</code></pre>
+<p>Full-text search returns every match with its date; the agent orders them and tells you what changed between them. This is the difference between "I think we said 2000" and a dated quote of the message where you both said it.</p>
+<h3 id="14-find-every-promise-you-made-to-one-person"><a class="anchor" href="#14-find-every-promise-you-made-to-one-person">#</a>1.4 Find every promise you made to one person</h3>
+<pre><code class="language-text">Search my chat with @lead for messages from me containing &quot;I&#x27;ll&quot;, &quot;I will&quot;,
+&quot;tomorrow&quot; or &quot;by Friday&quot;. What did I commit to and did I do it?</code></pre>
+<p>Your own outgoing messages are archived too. This is an uncomfortable prompt to run and a very useful one.</p>
+<h3 id="15-who-mentioned-this-across-every-chat-at-once"><a class="anchor" href="#15-who-mentioned-this-across-every-chat-at-once">#</a>1.5 "Who mentioned this?" across every chat at once</h3>
+<pre><code class="language-text">Search my whole archive for &quot;Hetzner&quot; - who has talked to me about it and when?</code></pre>
+<p>Telegram makes you pick a chat first. Your archive does not: one query spans every conversation you have ever synced.</p>
+<h3 id="16-find-it-when-you-cannot-spell-it"><a class="anchor" href="#16-find-it-when-you-cannot-spell-it">#</a>1.6 Find it when you cannot spell it</h3>
+<pre><code class="language-text">Find the street name someone sent me - it started with &quot;Khresh&quot; something</code></pre>
+<p>Full-text search runs first. When it finds nothing, tg-ai automatically falls back to a trigram substring match, so a fragment of a word still hits. The reply tells you which strategy matched, so you know how loose the hit was.</p>
+<h3 id="17-search-across-languages-and-alphabets-in-one-query"><a class="anchor" href="#17-search-across-languages-and-alphabets-in-one-query">#</a>1.7 Search across languages and alphabets in one query</h3>
+<p>Your chats are not monolingual and neither is the index. tg-ai deliberately uses a <code>simple</code> text search configuration rather than an English stemmer, because a stemmer built for one language silently drops matches for every other one (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0003-postgres-fts-simple-plus-trigram.md" target="_blank" rel="noopener">ADR-0003</a>).</p>
+<pre><code class="language-text">Find every message about the apartment deposit, in any language</code></pre>
+<h3 id="18-recover-the-link-you-never-bookmarked"><a class="anchor" href="#18-recover-the-link-you-never-bookmarked">#</a>1.8 Recover the link you never bookmarked</h3>
+<pre><code class="language-text">Find the article about Postgres indexes someone sent me this year</code></pre>
+<p>Every link you were ever sent is in the archive, searchable by the words around it. Your read-it-later app is not the only place things go to die.</p>
+<h3 id="19-reconstruct-an-invoice-an-order-or-a-booking"><a class="anchor" href="#19-reconstruct-an-invoice-an-order-or-a-booking">#</a>1.9 Reconstruct an invoice, an order or a booking</h3>
+<pre><code class="language-text">Find the order number and tracking link from the shop chat, and check the
+delivery status</code></pre>
+<p>The agent pulls the number out of the history and can then go and use it - a web fetch, a browser, whatever else your client has. tg-ai supplies the fact; your agent does the rest.</p>
+<h3 id="110-build-a-brief-on-a-person-before-you-talk-to-them"><a class="anchor" href="#110-build-a-brief-on-a-person-before-you-talk-to-them">#</a>1.10 Build a brief on a person before you talk to them</h3>
+<pre><code class="language-text">Summarise everything @partner and I have discussed in the last six months.
+What is still open?</code></pre>
+<p>One query, several hundred messages, one summary. This is the prompt to run twenty minutes before a call.</p>
+<hr>
+<h2 id="2-inbox-triage-without-opening-telegram"><a class="anchor" href="#2-inbox-triage-without-opening-telegram">#</a>2. Inbox triage without opening Telegram</h2>
+<p>Opening Telegram to check one thing costs you the next forty minutes. These prompts answer the question without opening the door.</p>
+<p><strong>Reading never marks anything as read.</strong> Your unread badges stay exactly where they were, so nobody sees a blue tick you did not intend to send.</p>
+<h3 id="21-the-deep-work-exit"><a class="anchor" href="#21-the-deep-work-exit">#</a>2.1 The deep-work exit</h3>
+<p>Four hours of focus. Phone face down. You surface, and there are fifty unread chats.</p>
+<pre><code class="language-text">Check my unread Telegram. Ignore spam and anything that isn&#x27;t a person.
+If there&#x27;s anything from my team, my boss or my family, summarise what they
+actually want - bullets, no fluff.</code></pre>
+<p><code>tg_get_unread_dialogs</code> lists who is waiting; <code>tg_get_recent_messages</code> pulls the detail only for the people you named. You get a paragraph instead of an hour.</p>
+<h3 id="22-the-morning-briefing"><a class="anchor" href="#22-the-morning-briefing">#</a>2.2 The morning briefing</h3>
+<pre><code class="language-text">What happened on Telegram overnight? Sort by whether it needs me today.</code></pre>
+<h3 id="23-is-anything-actually-on-fire"><a class="anchor" href="#23-is-anything-actually-on-fire">#</a>2.3 "Is anything actually on fire?"</h3>
+<pre><code class="language-text">Anything urgent in my unread? One line. If not, just say no.</code></pre>
+<p>The value of this prompt is the "no" - it is the one that lets you go back to work instead of checking anyway.</p>
+<h3 id="24-coming-back-from-holiday"><a class="anchor" href="#24-coming-back-from-holiday">#</a>2.4 Coming back from holiday</h3>
+<pre><code class="language-text">I&#x27;ve been away two weeks. Go through my unread, group it by person, and tell me
+what still matters now and what has already resolved itself.</code></pre>
+<p>Half of a two-week backlog is dead on arrival. Finding out which half is the whole job.</p>
+<h3 id="25-who-is-waiting-on-me-specifically"><a class="anchor" href="#25-who-is-waiting-on-me-specifically">#</a>2.5 Who is waiting on me, specifically</h3>
+<pre><code class="language-text">Which unread messages need a reply from me, and which are just FYI?</code></pre>
+<h3 id="26-did-they-answer-yet"><a class="anchor" href="#26-did-they-answer-yet">#</a>2.6 Did they answer yet?</h3>
+<pre><code class="language-text">What did @anna reply?</code></pre>
+<p><code>tg_get_recent_messages</code> reads the <strong>live</strong> account, not the archive, so a reply from thirty seconds ago is already there.</p>
+<hr>
+<h2 id="3-reporting-from-your-terminal"><a class="anchor" href="#3-reporting-from-your-terminal">#</a>3. Reporting from your terminal</h2>
+<p>Your agent already has the whole session in context: the files it changed, the decisions you made, the reasons. Writing that up by hand is pure re-entry of information the machine already has.</p>
+<h3 id="31-the-end-of-session-report"><a class="anchor" href="#31-the-end-of-session-report">#</a>3.1 The end-of-session report</h3>
+<p>You just refactored a schema together. Now someone has to tell the project manager.</p>
+<pre><code class="language-text">Write a detailed report on what we just did to the database - what changed,
+why the new schema is better, what to watch for - and send it to
+@project_manager on Telegram</code></pre>
+<p>The agent composes from real context, <code>tg_send_message</code> checks the recipient is someone you actually know, splits the text into chunks under Telegram's 4096-character limit on sentence boundaries, and paces them 2.5 seconds apart so nothing looks like a burst.</p>
+<h3 id="32-standup-written-from-what-actually-happened"><a class="anchor" href="#32-standup-written-from-what-actually-happened">#</a>3.2 Standup, written from what actually happened</h3>
+<pre><code class="language-text">Read my git log for today, turn it into a three-line standup, and send it
+to @team_lead</code></pre>
+<p>More accurate than what you would have typed from memory, and available before coffee.</p>
+<h3 id="33-deploy-and-incident-notices"><a class="anchor" href="#33-deploy-and-incident-notices">#</a>3.3 Deploy and incident notices</h3>
+<pre><code class="language-text">Deploy finished. Tell @ops it&#x27;s live, which version, and that the migration ran
+clean.</code></pre>
+<h3 id="34-send-the-long-thing-without-thinking-about-limits"><a class="anchor" href="#34-send-the-long-thing-without-thinking-about-limits">#</a>3.4 Send the long thing without thinking about limits</h3>
+<pre><code class="language-text">Send @colleague the full explanation of how our auth flow works</code></pre>
+<p>Four thousand characters is not your problem. Chunking on sentence boundaries, never mid-word, and the pacing between chunks are handled for you.</p>
+<h3 id="35-send-a-snippet-a-config-or-a-command"><a class="anchor" href="#35-send-a-snippet-a-config-or-a-command">#</a>3.5 Send a snippet, a config or a command</h3>
+<pre><code class="language-text">Send @dev the exact docker command we just worked out</code></pre>
+<h3 id="36-reach-someone-new---deliberately"><a class="anchor" href="#36-reach-someone-new---deliberately">#</a>3.6 Reach someone new - deliberately</h3>
+<pre><code class="language-text">Send the invoice details to +380501234567</code></pre>
+<p>If there is no history and they are not a contact, <strong>nothing is sent</strong>. You get a warning explaining that messaging a stranger from a personal account is what triggers Telegram's anti-spam system, and naming <code>tg_add_contact</code> as the deliberate next step. There is no override flag; that is the point.</p>
+<pre><code class="language-text">Add +380501234567 to my contacts as &quot;Maria Accounting&quot;, then send the invoice</code></pre>
+<hr>
+<h2 id="4-writing-in-your-own-voice"><a class="anchor" href="#4-writing-in-your-own-voice">#</a>4. Writing in your own voice</h2>
+<p>This is the part that makes the difference between an assistant you use twice and one you use every day.</p>
+<p>You do not write to your boss the way you write to your partner. A reply drafted in a model's default register - even a good one - is instantly obvious to anyone who knows you. The <a href="index.html#dialog-persona-replies-that-sound-like-you-not-like-a-model">Dialog Persona</a> is a per-chat style profile that fixes exactly that.</p>
+<h3 id="41-bootstrap-a-persona-for-your-busiest-chat"><a class="anchor" href="#41-bootstrap-a-persona-for-your-busiest-chat">#</a>4.1 Bootstrap a persona for your busiest chat</h3>
+<pre><code class="language-text">Look at how I write to @anna - read my actual messages - and record her dialog
+persona</code></pre>
+<p><code>tg_get_dialog_persona</code> returns three things: the measured statistics of your own messages in that chat, a sample of them verbatim, and whatever persona is already stored. Your agent reads them and calls <code>tg_set_dialog_persona</code> with what it observed - how you address her, your tone, who she is to you.</p>
+<h3 id="42-draft-a-reply-that-actually-sounds-like-you"><a class="anchor" href="#42-draft-a-reply-that-actually-sounds-like-you">#</a>4.2 Draft a reply that actually sounds like you</h3>
+<pre><code class="language-text">Reply to @anna about moving Friday&#x27;s meeting to Monday</code></pre>
+<p>Before drafting, the agent reads the persona. It knows your median message length in *that specific chat*, whether you start sentences in lower case, whether you use emoji with her, whether you punctuate, and whether you tend to fire three short lines instead of one long one.</p>
+<h3 id="43-a-different-register-for-every-person"><a class="anchor" href="#43-a-different-register-for-every-person">#</a>4.3 A different register for every person</h3>
+<pre><code class="language-text">Show me which of my chats have a persona and which don&#x27;t, busiest first</code></pre>
+<p><code>tg_list_dialog_personas</code> orders your dialogs by how much you have written in them, so you can see instantly where a persona is worth having. Write one for your boss, one for your partner, one for your best client - each independent.</p>
+<h3 id="44-get-the-formalinformal-you-right-every-time"><a class="anchor" href="#44-get-the-formalinformal-you-right-every-time">#</a>4.4 Get the formal/informal "you" right, every time</h3>
+<p>Languages with a formal and informal second person make this the single most embarrassing thing to get wrong. It lives in the persona's <code>addressing</code> field, written by your agent from your real messages rather than guessed per reply.</p>
+<pre><code class="language-text">Record @director&#x27;s persona - note that I address him formally and always use
+his first name and patronymic</code></pre>
+<h3 id="45-keep-your-habits-including-the-unflattering-ones"><a class="anchor" href="#45-keep-your-habits-including-the-unflattering-ones">#</a>4.5 Keep your habits, including the unflattering ones</h3>
+<p>If you never capitalise, never use full stops, and answer "ok" 40% of the time, the persona records exactly that. The agent is told the *distribution* - median, 90th percentile, short-reply share - not an average, because a model told "your typical reply is 90 characters" writes 90 characters every time, and that uniformity is itself the giveaway.</p>
+<h3 id="46-write-the-hard-message"><a class="anchor" href="#46-write-the-hard-message">#</a>4.6 Write the hard message</h3>
+<pre><code class="language-text">Read how I write to @boss, then draft a message asking for a review of my
+salary. Keep it in my voice - don&#x27;t make it sound like a cover letter.</code></pre>
+<p>The message you have been putting off for three weeks, drafted in your own register instead of a model's business-formal default. You still edit it. You still send it. But you start from something that sounds like you.</p>
+<h3 id="47-the-right-language-per-chat"><a class="anchor" href="#47-the-right-language-per-chat">#</a>4.7 The right language per chat</h3>
+<p>The persona records your <strong>script mix</strong> for each conversation - Latin, Cyrillic and so on, with the share of each - so a reply comes back in the language and alphabet you actually use with that person, not the language you happen to be prompting in.</p>
+<h3 id="48-know-when-a-persona-has-gone-stale"><a class="anchor" href="#48-know-when-a-persona-has-gone-stale">#</a>4.8 Know when a persona has gone stale</h3>
+<pre><code class="language-text">Is @anna&#x27;s persona still accurate?</code></pre>
+<p>Freshness is judged on three axes and the answer names which one fired: <strong>volume</strong> (50 new messages of yours since the analysis), <strong>age</strong> (90 days), or <strong>drift</strong> (any of five measured ratios moving by 0.20, or your median length doubling). A stale persona says so instead of quietly describing who you used to be.</p>
+<h3 id="49-why-it-never-degenerates-into-a-model-imitating-itself"><a class="anchor" href="#49-why-it-never-degenerates-into-a-model-imitating-itself">#</a>4.9 Why it never degenerates into a model imitating itself</h3>
+<p>Every message this server sends is archived exactly like one you typed by hand. Left alone, a persona re-analysed after a few drafted replies would measure its own output, and within two or three refreshes it would be a model of the model - reading *more* consistent than you, so the drift would be invisible.</p>
+<p>So the analysis window is <strong>frozen</strong> at creation. Messages archived after the baseline are never measured (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0008-dialog-persona-hybrid-authorship.md" target="_blank" rel="noopener">ADR-0008</a>). Your persona describes you, permanently, and only your own outgoing messages ever reach the analyser.</p>
+<hr>
+<h2 id="5-chained-and-autonomous-workflows"><a class="anchor" href="#5-chained-and-autonomous-workflows">#</a>5. Chained and autonomous workflows</h2>
+<p>tg-ai has no loop and no brain of its own - it is a set of handles. The loop lives in your agent. That is what makes these possible.</p>
+<h3 id="51-wait-for-approval-then-act"><a class="anchor" href="#51-wait-for-approval-then-act">#</a>5.1 Wait for approval, then act</h3>
+<pre><code class="language-text">Tell @lead_dev the DB schema is ready and ask for deploy approval. Keep checking
+his replies; the moment he says ok or go ahead, run docker compose up -d and
+apply the migrations.</code></pre>
+<p>The agent sends, then polls <code>tg_get_recent_messages</code>, reads the *meaning* of the answer rather than matching a keyword, and only then switches to your shell. You are not sitting there refreshing a chat.</p>
+<h3 id="52-a-scheduled-inbox-check"><a class="anchor" href="#52-a-scheduled-inbox-check">#</a>5.2 A scheduled inbox check</h3>
+<p>If your client can run on a timer (Claude Code's <code>/loop</code>, a cron job, a systemd timer), point it at the same prompt:</p>
+<pre><code class="language-text">Every 30 minutes: check unread Telegram. If anything is from my team and looks
+urgent, tell me. Otherwise stay quiet.</code></pre>
+<h3 id="53-an-escalation-ladder"><a class="anchor" href="#53-an-escalation-ladder">#</a>5.3 An escalation ladder</h3>
+<pre><code class="language-text">Ask @contractor for a status update. If there&#x27;s no reply in four hours, tell me
+rather than asking again.</code></pre>
+<p>Note what this does *not* do: it does not nag. One message, then it reports back to you. Repeated unanswered messages are exactly the pattern Telegram's anti-spam system looks for.</p>
+<h3 id="54-research-then-report"><a class="anchor" href="#54-research-then-report">#</a>5.4 Research, then report</h3>
+<pre><code class="language-text">Read the last week of my chat with @client, cross-check it against the open
+issues in this repo, and send me a summary of what we owe them</code></pre>
+<h3 id="55-the-end-of-day-digest"><a class="anchor" href="#55-the-end-of-day-digest">#</a>5.5 The end-of-day digest</h3>
+<pre><code class="language-text">Summarise every Telegram conversation I had today, list what I promised anyone,
+and send that summary to my own Saved Messages</code></pre>
+<p>Sending to <code>me</code> targets Saved Messages, which is always allowed - the account is writing to itself. It is the perfect place for a private daily log.</p>
+<hr>
+<h2 id="6-life-admin-and-relationships"><a class="anchor" href="#6-life-admin-and-relationships">#</a>6. Life admin and relationships</h2>
+<p>Not everything worth automating is work.</p>
+<h3 id="61-the-replies-you-owe"><a class="anchor" href="#61-the-replies-you-owe">#</a>6.1 The replies you owe</h3>
+<pre><code class="language-text">Find people who wrote to me in the last two weeks that I never replied to</code></pre>
+<p>The quiet social debt that accumulates in a messenger, made visible.</p>
+<h3 id="62-family-logistics"><a class="anchor" href="#62-family-logistics">#</a>6.2 Family logistics</h3>
+<pre><code class="language-text">Check if my wife sent me anything about the weekend, and what I&#x27;m supposed to
+be buying</code></pre>
+<h3 id="63-negotiating-with-a-seller"><a class="anchor" href="#63-negotiating-with-a-seller">#</a>6.3 Negotiating with a seller</h3>
+<pre><code class="language-text">Find everything in my chat with the seller about the price and the condition,
+and draft a reply holding at my last offer - in my usual tone, not too soft</code></pre>
+<h3 id="64-reconnect-before-it-gets-awkward"><a class="anchor" href="#64-reconnect-before-it-gets-awkward">#</a>6.4 Reconnect before it gets awkward</h3>
+<pre><code class="language-text">Search my archive for people I used to talk to often and haven&#x27;t messaged in
+over six months</code></pre>
+<h3 id="65-a-recurring-commitment-tracked"><a class="anchor" href="#65-a-recurring-commitment-tracked">#</a>6.5 A recurring commitment, tracked</h3>
+<pre><code class="language-text">Find every message where I agreed to send someone something, and check which of
+those I actually followed up on</code></pre>
+<hr>
+<h2 id="what-tg-ai-cannot-do"><a class="anchor" href="#what-tg-ai-cannot-do">#</a>What tg-ai cannot do</h2>
+<p>Stated plainly, because a tool that oversells itself wastes your time:</p>
+<ul><li><strong>It cannot reply automatically on its own.</strong> There is no LLM in this repository. tg-ai is passive: it sleeps until a client calls it. Autonomous replies require an agent loop running on top - see <a href="#5-chained-and-autonomous-workflows">5. Chained and autonomous workflows</a>.</li><li><strong>No groups and no channels.</strong> Private one-on-one chats with people only.</li><li><strong>No media.</strong> Only message text is archived and sent - no photos, files or voice notes.</li><li><strong>It never deletes or edits</strong> anything on your account, and reading never marks a chat as read.</li><li><strong>No bulk or broadcast sending.</strong> One recipient at a time, by design. A batch send would defeat every anti-spam guarantee in the project.</li><li><strong>No messaging strangers.</strong> No history and not a contact means nothing is sent. There is no override flag.</li><li><strong>The archive is as fresh as your last sync.</strong> <code>tg_search_local_history</code> sees what <code>just tg-sync</code> has pulled; <code>tg_get_recent_messages</code> covers the gap by reading the live account.</li></ul>
+<h2 id="faq"><a class="anchor" href="#faq">#</a>FAQ</h2>
+<h3 id="can-this-run-as-a-fully-automatic-autoresponder"><a class="anchor" href="#can-this-run-as-a-fully-automatic-autoresponder">#</a>Can this run as a fully automatic autoresponder?</h3>
+<p>Technically yes, but not from this repository alone. Every handle you need is here - <code>tg_get_unread_dialogs</code> to notice, <code>tg_get_dialog_persona</code> to sound like you, <code>tg_send_message</code> to reply. What is missing is the loop and the model, and both live in your agent. Put an autonomous client on a timer and you have one.</p>
+<p>Whether you *should* is a different question. Consider starting with drafts you approve before sending.</p>
+<h3 id="will-people-be-able-to-tell-it-is-not-me"><a class="anchor" href="#will-people-be-able-to-tell-it-is-not-me">#</a>Will people be able to tell it is not me?</h3>
+<p>That is exactly what the <a href="#4-writing-in-your-own-voice">Dialog Persona</a> is for, and it is the honest answer that this is a per-chat style profile, not magic. It matches length, rhythm, punctuation, capitalisation, emoji rate, script and register from your real messages. Judgement about *what to say* remains yours.</p>
+<h3 id="is-my-chat-history-sent-anywhere"><a class="anchor" href="#is-my-chat-history-sent-anywhere">#</a>Is my chat history sent anywhere?</h3>
+<p>No. The archive is a PostgreSQL container bound to <code>127.0.0.1:5434</code>. The model in your MCP client only ever sees what a tool returns in answer to something you asked.</p>
+<h3 id="how-fast-is-search-really"><a class="anchor" href="#how-fast-is-search-really">#</a>How fast is search, really?</h3>
+<p>It is a single indexed query against local PostgreSQL - a GIN index over a generated <code>tsvector</code> column, with a <code>pg_trgm</code> fallback. No network call to Telegram is involved, which is also why it has no rate limit.</p>
+<h3 id="what-happens-if-i-hit-a-telegram-rate-limit"><a class="anchor" href="#what-happens-if-i-hit-a-telegram-rate-limit">#</a>What happens if I hit a Telegram rate limit?</h3>
+<p>You are told, and nothing retries. A <code>FloodWaitError</code> comes back as "we must wait N seconds" rather than a retry loop - because retrying is what extends the limit.</p>
+<hr>
+<p><strong>Ready?</strong> <a href="index.html#quickstart">Install tg-ai</a> · <a href="https://github.com/anrysys/tg-ai/blob/main/docs/70-ops/security.md" target="_blank" rel="noopener">Read the safety rules</a> · <a href="https://github.com/anrysys/tg-ai/blob/main/docs/README.md" target="_blank" rel="noopener">Browse the full documentation</a></p>
+</main>
+<footer>
+  <p>MIT licensed. Built for one personal Telegram account on one machine.
+  <a href="https://github.com/anrysys/tg-ai" target="_blank" rel="noopener">Source on GitHub</a> ·
+  <a href="https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/README.md" target="_blank" rel="noopener">Russian</a></p>
+</footer>
+</body>
+</html>

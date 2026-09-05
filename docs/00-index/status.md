@@ -27,12 +27,17 @@ real Telegram account** - that is M5, and it requires the user.
 | `server.py` | Done. Verified over a real MCP stdio session. Nine tools |
 | Dialog Persona | Code complete (M6). Exercised end to end against the live PostgreSQL with fixture data; never yet written for a real person |
 | Documentation base | Done |
+| Public presentation | Done. README rewritten for discoverability, `USE-CASES.md` added, Russian mirror under `docs/i18n/ru/`, generated GitHub Pages site with JSON-LD |
 
 ## Verified
 
 Empirically, on this machine:
 
 - 152 offline tests pass; `ruff` and `black` clean.
+- CI reproduces that result again. It had been failing on `main`: `ci.yml`
+  invoked bare `pytest`, which leaves the repository root off `sys.path`,
+  so `tests/conftest.py` could not `import tg_ai`. Both the failure and the
+  fix were reproduced locally before the change.
 - PostgreSQL 16 on `127.0.0.1:5434` is healthy; `sql/schema.sql` applies cleanly.
 - Idempotency: re-inserting the same messages added **0** rows.
 - Cursor monotonicity: advancing to a lower id left the cursor at its higher value.
@@ -42,7 +47,12 @@ Empirically, on this machine:
 - A real MCP client completed `initialize`, `list_tools` and `call_tool` against
   `server.py` over stdio. All tools registered with correct schemas, and
   stdout carried protocol traffic only. `list_tools` now reports nine.
-- `markdownlint-cli2`: 0 issues across 49 markdown files.
+- `markdownlint-cli2`: 0 issues across 53 markdown files.
+- `scripts/check_links.py`: 271 relative links resolve.
+- The generated site rebuilds byte-identically from `README.md` and
+  `USE-CASES.md` (`just site-check`), and its JSON-LD parses as one
+  `SoftwareApplication`, one `HowTo` of 9 steps and one `FAQPage` of 9
+  questions - all extracted from the page rather than hand-written.
 - Target filtering verified against a stubbed dialog list: correct selection,
   dialog order preserved, unmatched targets warned about, and a bot named as a
   target still excluded by `SPEC-SYNC-001`.
@@ -78,6 +88,8 @@ Everything requiring a real account. See M5 in the
 - Whether a reply drafted from a Dialog Persona actually reads as the user's own.
   Only the user can judge that (TASK-011).
 - Pattern Drift on real data: it needs a persona old enough to have drifted.
+- Whether the GitHub Pages deployment succeeds: Pages is not enabled on the
+  repository yet, and enabling it is the user's call.
 
 ## Archive contents
 

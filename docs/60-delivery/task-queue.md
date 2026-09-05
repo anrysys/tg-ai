@@ -19,6 +19,8 @@ record that the question was already settled.
 | TASK-007 | Run the M5 live acceptance checklist | The user: needs real credentials and a real account |
 | TASK-008 | Record the real archive size in `status.md` after the first full sync | TASK-007 |
 | TASK-011 | Write a Dialog Persona for each active dialog, and judge whether drafted replies read as the user's own | The user: only they can tell |
+| TASK-012 | Package for PyPI so the install is `uvx tg-ai-mcp` rather than a clone. Needs a `[project]` table, which AGENTS.md section 4 currently reads as tooling-only, and therefore a superseding ADR | The user: must claim the PyPI name and agree to the packaging ADR |
+| TASK-013 | `db.rebaseline_persona` and `_REBASELINE_PERSONA_SQL` have zero call sites, so a Persona Baseline can never move once created. Either wire it up behind an explicit tool argument or delete it | Nothing. Decide which |
 
 ## Open questions
 

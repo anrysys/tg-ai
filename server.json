@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.anrysys/tg-ai",
+  "description": "Local MCP server that lets an AI agent drive your personal Telegram account over MTProto: send as you, read replies, full-text search your whole chat history in PostgreSQL, and draft replies in your own per-chat writing style. Anti-ban guardrails built in.",
+  "status": "active",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/anrysys/tg-ai",
+    "source": "github"
+  },
+  "websiteUrl": "https://anrysys.github.io/tg-ai/",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "registryBaseUrl": "https://github.com",
+      "identifier": "https://github.com/anrysys/tg-ai",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TG_API_ID",
+          "description": "Telegram API ID from https://my.telegram.org",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "TG_API_HASH",
+          "description": "Telegram API hash from https://my.telegram.org",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "DATABASE_URL",
+          "description": "PostgreSQL connection string for the local archive",
+          "isRequired": false,
+          "isSecret": true,
+          "default": "postgresql://tgai:tgai@127.0.0.1:5434/tgai"
+        },
+        {
+          "name": "TG_SESSION_NAME",
+          "description": "Base name of the Telethon session file",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "tg_session"
+        },
+        {
+          "name": "TG_EXPECTED_USERNAME",
+          "description": "Optional guard: warn if the logged-in account is not this username",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

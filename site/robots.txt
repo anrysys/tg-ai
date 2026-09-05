@@ -1,0 +1,5 @@
+# Every crawler is welcome, including the ones that train and answer.
+User-agent: *
+Allow: /
+
+Sitemap: https://anrysys.github.io/tg-ai/sitemap.xml

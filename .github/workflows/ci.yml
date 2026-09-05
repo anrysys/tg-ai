@@ -20,12 +20,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # `python -m` throughout, matching the Justfile exactly. Bare `pytest`
+      # puts only `tests/` on sys.path, so `import tg_ai` in conftest fails in
+      # CI while `just py-test` passes locally - which is how this went red
+      # without anyone noticing.
       - name: Lint
         run: |
-          ruff check .
-          black --check .
+          python -m ruff check .
+          python -m black --check .
 
       # The suite is deliberately offline: no Telegram credentials, no
       # database. Every rule that protects the account is a pure function.
       - name: Test
-        run: pytest
+        run: python -m pytest

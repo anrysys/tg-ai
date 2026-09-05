@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tg-ai - Telegram MCP Server for AI Agents</title>
+<meta name="description" content="Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.">
+<link rel="canonical" href="https://anrysys.github.io/tg-ai/">
+<meta name="author" content="anrysys">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="tg-ai">
+<meta property="og:title" content="tg-ai - Telegram MCP Server for AI Agents">
+<meta property="og:description" content="Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.">
+<meta property="og:url" content="https://anrysys.github.io/tg-ai/">
+<meta property="og:image" content="https://anrysys.github.io/tg-ai/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="tg-ai - Telegram MCP Server for AI Agents">
+<meta name="twitter:description" content="Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.">
+<meta name="twitter:image" content="https://anrysys.github.io/tg-ai/og.png">
+<link rel="alternate" type="text/plain" href="https://anrysys.github.io/tg-ai/llms.txt" title="llms.txt">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://anrysys.github.io/tg-ai/#website",
+      "url": "https://anrysys.github.io/tg-ai/",
+      "name": "tg-ai",
+      "description": "Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.",
+      "inLanguage": "en"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://anrysys.github.io/tg-ai/#webpage",
+      "url": "https://anrysys.github.io/tg-ai/",
+      "name": "tg-ai - Telegram MCP Server for AI Agents",
+      "description": "Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.",
+      "isPartOf": {
+        "@id": "https://anrysys.github.io/tg-ai/#website"
+      },
+      "inLanguage": "en"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://anrysys.github.io/tg-ai/#software",
+      "name": "tg-ai",
+      "alternateName": "tg-ai Telegram MCP server",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Model Context Protocol server",
+      "operatingSystem": "Linux, macOS, Windows",
+      "url": "https://anrysys.github.io/tg-ai/",
+      "downloadUrl": "https://github.com/anrysys/tg-ai",
+      "codeRepository": "https://github.com/anrysys/tg-ai",
+      "programmingLanguage": "Python",
+      "softwareVersion": "0.1.0",
+      "license": "https://opensource.org/licenses/MIT",
+      "description": "Local MCP server that lets Claude Code, Cursor, Codex, Antigravity and any other AI agent drive your personal Telegram account: send as you, read replies, full-text search your whole chat history, and draft replies in your own per-chat writing style.",
+      "softwareRequirements": "Python 3.12+, PostgreSQL 16, Docker, uv, just",
+      "featureList": [
+        "Send Telegram messages from your own account via an AI agent",
+        "Read replies live without marking chats as read",
+        "Full-text search your entire chat history in local PostgreSQL",
+        "Per-chat writing-style profile (Dialog Persona) for drafted replies",
+        "Non-overridable Send Guard that refuses to message strangers",
+        "Runs fully local; the archive never leaves 127.0.0.1"
+      ],
+      "keywords": "Telegram MCP server, Model Context Protocol, MTProto, AI agent, Claude Code, Cursor, chat history search, PostgreSQL, local-first",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "anrysys",
+        "url": "https://github.com/anrysys"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://anrysys.github.io/tg-ai/#howto",
+      "name": "Install the tg-ai Telegram MCP server",
+      "description": "Clone, configure, authenticate, sync and register tg-ai with your AI client.",
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "git clone https://github.com/anrysys/tg-ai.git",
+          "text": "git clone https://github.com/anrysys/tg-ai.git"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "cd tg-ai",
+          "text": "cd tg-ai"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "just setup - venv + dependencies + .env",
+          "text": "just setup - venv + dependencies + .env"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "$EDITOR .env - set TG_API_ID and TG_API_HASH",
+          "text": "$EDITOR .env - set TG_API_ID and TG_API_HASH"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "just db-up - PostgreSQL on 127.0.0.1:5434",
+          "text": "just db-up - PostgreSQL on 127.0.0.1:5434"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 6,
+          "name": "just tg-auth - interactive login: phone, SMS code, 2FA",
+          "text": "just tg-auth - interactive login: phone, SMS code, 2FA"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 7,
+          "name": "just tg-sync-targets @anna @bob - archive the people who matter first (fast)",
+          "text": "just tg-sync-targets @anna @bob - archive the people who matter first (fast)"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 8,
+          "name": "just tg-sync-full - then the rest (hours; resumable)",
+          "text": "just tg-sync-full - then the rest (hours; resumable)"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 9,
+          "name": "just mcp-add - register with Claude Code",
+          "text": "just mcp-add - register with Claude Code"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://anrysys.github.io/tg-ai/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is this a Telegram bot?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Telegram bots use the Bot API, cannot message people first, and are visibly bots. tg-ai drives your real user account over MTProto, so messages come from you and appear in your existing chats. That power is also why the Send Guard exists."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Will this get my Telegram account banned?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Automating a personal account always carries risk, and nobody can promise otherwise - read the disclaimer above. tg-ai is built to keep you inside normal human behaviour: it refuses to message strangers, paces every chunk 2.5 seconds apart, never retries a flood wait, and runs from your own IP address. It sends to one person at a time and has no bulk or broadcast mode by design."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can it reply to people automatically while I sleep?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not on its own. There is no LLM in this repository. tg-ai is a passive set of tools; it has no loop and no brain, and it sleeps until a client calls it. To build an autoresponder you point an autonomous agent at it - poll tggetunreaddialogs, read tggetdialogpersona, draft, then call tgsendmessage. Every handle you need is here; the decision to pull them is yours."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does my chat history leave my machine?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The archive is a PostgreSQL container bound to 127.0.0.1:5434, and the session file lives in the repository with mode 0600. Nothing is uploaded anywhere. Your MCP client's model sees only what a tool returns when you ask it a question."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which AI clients and IDEs are supported?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Any program that speaks MCP over stdio - Claude Code, Claude Desktop, Cursor, Antigravity, Codex, Windsurf, VS Code with Copilot agent mode, Gemini CLI, Cline, Roo Code, Zed, Qoder, Kimi, Trae, Warp, JetBrains AI Assistant, Continue, OpenCode and others. See the install matrix above."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it read group chats and channels?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Private one-on-one chats with people only. Groups, channels, bots and Telegram's own service account are excluded from the sync and from every tool."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the Model Context Protocol?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "MCP is an open standard for connecting AI assistants to external tools and data. An MCP server publishes tools; an MCP client - your IDE or agent - calls them. tg-ai is an MCP server, so it works in any client without a per-client plugin."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why PostgreSQL and not SQLite?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because the point is search. Postgres gives generated tsvector columns, GIN indexes and pgtrgm for free, so a query over years of history returns in milliseconds and partial words still match (ADR-0006)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it store my messages' media, or delete anything?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Neither. Only message text is archived. The server never deletes or edits anything on your account, and reading never marks a chat as read."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+<style>:root{color-scheme:light dark;--bg:#ffffff;--fg:#1a1d23;--muted:#5b6472;--line:#e3e7ed;
+--accent:#2563eb;--code-bg:#f5f7fa;--card:#f9fafb;--warn-bg:#fff8e6;--warn-line:#e0a800}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9aa7b6;
+--line:#252b33;--accent:#6ea8ff;--code-bg:#161b22;--card:#11161d;--warn-bg:#2a2110;--warn-line:#7a5c00}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+-webkit-text-size-adjust:100%}
+.skip{position:absolute;left:-9999px}.skip:focus{left:8px;top:8px;background:var(--accent);
+color:#fff;padding:8px 12px;border-radius:6px;z-index:10}
+.topbar{position:sticky;top:0;background:color-mix(in srgb,var(--bg) 92%,transparent);
+backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:5}
+.topbar nav{max-width:860px;margin:0 auto;padding:12px 20px;display:flex;gap:20px;
+align-items:center;flex-wrap:wrap;font-size:14px}
+.topbar a{color:var(--muted);text-decoration:none}.topbar a:hover{color:var(--accent)}
+.topbar .brand{font-weight:700;color:var(--fg);font-size:16px;letter-spacing:.5px}
+main{max-width:860px;margin:0 auto;padding:32px 20px 64px}
+h1,h2,h3,h4{line-height:1.25;margin:1.8em 0 .6em;scroll-margin-top:70px}
+h1{font-size:2.1rem;margin-top:.4em;letter-spacing:-.02em}
+h2{font-size:1.5rem;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+h3{font-size:1.17rem}
+h1 .anchor,h2 .anchor,h3 .anchor,h4 .anchor{float:left;margin-left:-.8em;padding-right:.3em;
+color:var(--line);text-decoration:none;opacity:0}
+h1:hover .anchor,h2:hover .anchor,h3:hover .anchor,h4:hover .anchor{opacity:1}
+p{margin:0 0 1em}
+a{color:var(--accent)}
+img{max-width:100%;height:auto}
+code{background:var(--code-bg);padding:.15em .4em;border-radius:4px;
+font:0.87em/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;
+padding:14px 16px;overflow-x:auto;margin:0 0 1.2em}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+.table-wrap{overflow-x:auto;margin:0 0 1.4em;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--card);font-weight:600;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+blockquote.quote{margin:0 0 1.3em;padding:12px 18px;border-left:3px solid var(--line);
+background:var(--card);border-radius:0 8px 8px 0;color:var(--muted)}
+blockquote.quote p:last-child{margin-bottom:0}
+blockquote.alert-warning{background:var(--warn-bg);border-left-color:var(--warn-line);color:var(--fg)}
+.alert-label{font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:.75rem;
+margin:0 0 .4em}
+ul,ol{margin:0 0 1.2em;padding-left:1.4em}li{margin:.3em 0}
+hr{border:none;border-top:1px solid var(--line);margin:2.4em 0}
+details{border:1px solid var(--line);border-radius:8px;padding:10px 16px;margin:0 0 .7em;
+background:var(--card)}
+details[open]{padding-bottom:4px}
+summary{cursor:pointer;font-weight:600;margin:-2px 0}
+footer{border-top:1px solid var(--line);padding:24px 20px 48px;text-align:center;
+color:var(--muted);font-size:.86rem}
+footer a{color:var(--muted)}
+@media(max-width:600px){main{padding:20px 16px 48px}h1{font-size:1.7rem}h2{font-size:1.3rem}}</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+  <nav>
+    <a class="brand" href="./">tg-ai</a>
+    <a href="./">Overview</a>
+    <a href="use-cases.html">Use cases</a>
+    <a href="https://github.com/anrysys/tg-ai" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/anrysys/tg-ai/blob/main/docs/README.md" target="_blank" rel="noopener">Docs</a>
+  </nav>
+</header>
+<main id="content">
+<h1 id="tg-ai---telegram-mcp-server-for-ai-agents"><a class="anchor" href="#tg-ai---telegram-mcp-server-for-ai-agents">#</a>tg-ai - Telegram MCP Server for AI Agents</h1>
+<p align="center">
+<img src="assets/logo.svg" alt="tg-ai - Telegram MCP server for AI agents, MTProto, local PostgreSQL archive" width="100%">
+</p>
+<p align="center">
+<a href="https://github.com/anrysys/tg-ai/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
+<a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12%2B-3776AB.svg?logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
+<a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8A2BE2.svg" alt="Model Context Protocol server"></a>
+<a href="https://github.com/anrysys/tg-ai/actions/workflows/ci.yml"><img src="https://github.com/anrysys/tg-ai/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+<a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-336791.svg?logo=postgresql&amp;logoColor=white" alt="PostgreSQL 16"></a>
+<a href="https://github.com/anrysys/tg-ai/stargazers"><img src="https://img.shields.io/github/stars/anrysys/tg-ai?style=flat&amp;logo=github" alt="GitHub stars"></a>
+</p>
+<p><strong>tg-ai is a local <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a> (MCP) server that gives any AI agent hands and eyes inside your <em>personal</em> Telegram account.</strong> Send messages as yourself, read replies, full-text search your entire chat history in milliseconds, and draft replies that actually sound like you - without leaving your terminal or your IDE.</p>
+<p>Works with Claude Code, Claude Desktop, Cursor, Antigravity, Codex, Windsurf, VS Code, Gemini CLI, Cline, Zed, Qoder, Kimi, Trae, Warp, JetBrains AI and every other program that speaks MCP.</p>
+<p>Everything runs on your machine. The archive of your conversations never leaves <code>127.0.0.1</code>.</p>
+<p><strong><a href="use-cases.html">Use cases and prompt recipes</a></strong> · <a href="https://github.com/anrysys/tg-ai/blob/main/docs/README.md" target="_blank" rel="noopener">Documentation</a> · <a href="https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/README.md" target="_blank" rel="noopener">Read in Russian</a></p>
+<blockquote class="quote alert alert-warning"><p class="alert-label">Warning</p><p><strong>DISCLAIMER: This tool automates personal Telegram accounts using MTProto. Telegram's anti-spam algorithms are strict. While this project includes safeguards (rate-limiting, strict checks against messaging non-contacts), the author is NOT responsible for any PeerFloodError, temporary limits, or permanent bans applied to your account. Use at your own risk. NEVER share your .session files or API_ID.</strong></p></blockquote>
+<hr>
+<h2 id="what-is-tg-ai"><a class="anchor" href="#what-is-tg-ai">#</a>What is tg-ai?</h2>
+<p>tg-ai is an MCP server for Telegram that runs entirely on your own computer. MCP is the open standard that lets an AI agent call tools; tg-ai publishes nine of them, so your agent can act on your Telegram account the way you would.</p>
+<p>It is <strong>not</strong> a Telegram bot. It drives your real user account over MTProto (via <a href="https://docs.telethon.dev/" target="_blank" rel="noopener">Telethon</a>), so messages come from you, arrive in the same chats you already use, and can reach people who would never talk to a bot.</p>
+<p>Two things make it fast and safe:</p>
+<ul><li><strong>A local PostgreSQL archive.</strong> Your history is synced once into Postgres with full-text and trigram indexes. Search hits the database, not the Telegram API, so it is instant, unlimited and carries zero ban risk.</li><li><strong>A Send Guard that cannot be turned off.</strong> Messaging strangers from a personal account is what gets accounts banned, so tg-ai refuses to do it. There is no <code>force</code> flag, on purpose.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>You say to your agent</th><th>What happens</th></tr></thead><tbody><tr><td>"Send a summary of this session to @anna"</td><td>The agent composes the text and sends it from your account, split into chunks if long</td></tr><tr><td>"Any new messages?"</td><td>You get who is waiting and what they said - without marking anything read</td></tr><tr><td>"What did @anna reply?"</td><td>Live read from Telegram, so a reply from a minute ago is there</td></tr><tr><td>"Find the address someone sent me last year"</td><td>Instant search across your whole archived history, in any language, with no Telegram API call</td></tr><tr><td>"Reply to @anna about the meeting"</td><td>The agent reads how you write to <em>her specifically</em>, then drafts in your voice</td></tr></tbody></table></div>
+<h2 id="quickstart"><a class="anchor" href="#quickstart">#</a>Quickstart</h2>
+<p>Needs Python 3.12+, <a href="https://docs.astral.sh/uv/" target="_blank" rel="noopener"><code>uv</code></a>, <a href="https://just.systems" target="_blank" rel="noopener"><code>just</code></a> and Docker.</p>
+<pre><code class="language-bash">git clone https://github.com/anrysys/tg-ai.git
+cd tg-ai
+
+just setup                       # venv + dependencies + .env
+$EDITOR .env                     # set TG_API_ID and TG_API_HASH
+just db-up                       # PostgreSQL on 127.0.0.1:5434
+just tg-auth                     # interactive login: phone, SMS code, 2FA
+just tg-sync-targets @anna @bob  # archive the people who matter first (fast)
+just tg-sync-full                # then the rest (hours; resumable)
+just mcp-add                     # register with Claude Code</code></pre>
+<p>Get <code>TG_API_ID</code> and <code>TG_API_HASH</code> at &lt;https://my.telegram.org&gt; → API development tools.</p>
+<p><code>just tg-auth</code> <strong>must run in a real terminal</strong> - it asks for the code Telegram sends you, and an MCP server has no way to prompt.</p>
+<p>Then restart your agent and ask it to run <code>tg_whoami()</code>.</p>
+<h3 id="archive-the-people-who-matter-first"><a class="anchor" href="#archive-the-people-who-matter-first">#</a>Archive the people who matter first</h3>
+<p>On an account with hundreds of dialogs a full backfill takes hours and pauses on Telegram rate limits. <code>just tg-sync-targets</code> archives only the people you name, so search over those conversations works within minutes. Each target matches a username (with or without <code>@</code>), a phone number, a numeric id, or a first, last or full name; anything matching no dialog is reported so a typo is obvious:</p>
+<pre><code class="language-bash">just tg-sync-targets @anna &quot;Anna Petrova&quot; +380501234567</code></pre>
+<p>Running <code>just tg-sync-full</code> afterwards costs nothing for the dialogs already archived - insertion is idempotent.</p>
+<h2 id="install-in-your-ai-client"><a class="anchor" href="#install-in-your-ai-client">#</a>Install in your AI client</h2>
+<p>Every client below launches the same stdio server; only the config file and its wrapper key differ. Wherever you see <code>/absolute/path/to/tg-ai</code>, use the output of <code>pwd</code> from inside the cloned repository.</p>
+<details>
+<summary><b>Claude Code</b></summary>
+<pre><code class="language-bash">just mcp-add</code></pre>
+<p>Or by hand:</p>
+<pre><code class="language-bash">claude mcp add tg-ai -s user -- /absolute/path/to/tg-ai/.venv/bin/python /absolute/path/to/tg-ai/server.py</code></pre>
+<p>Verify with <code>claude mcp list</code>, then ask the agent to call <code>tg_whoami()</code>.</p>
+</details>
+<details>
+<summary><b>Claude Desktop</b></summary>
+<p>Edit <code>claude_desktop_config.json</code> (macOS: <code>~/Library/Application Support/Claude/</code>, Windows: <code>%APPDATA%\Claude\</code>):</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Cursor</b></summary>
+<p>Project scope <code>.cursor/mcp.json</code>, or global <code>~/.cursor/mcp.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Windsurf</b></summary>
+<p><code>~/.codeium/windsurf/mcp_config.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>VS Code (GitHub Copilot agent mode)</b></summary>
+<p>VS Code uses <code>servers</code>, not <code>mcpServers</code>. Put this in <code>.vscode/mcp.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;servers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;type&quot;: &quot;stdio&quot;,
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;]
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Codex CLI</b></summary>
+<p>Codex uses TOML. In <code>~/.codex/config.toml</code>:</p>
+<pre><code class="language-toml">[mcp_servers.tg-ai]
+command = &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;
+args = [&quot;/absolute/path/to/tg-ai/server.py&quot;]</code></pre>
+</details>
+<details>
+<summary><b>Google Antigravity</b></summary>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Gemini CLI</b></summary>
+<p><code>~/.gemini/settings.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Cline / Roo Code</b></summary>
+<p>Open the MCP Servers panel → Configure, then add to <code>cline_mcp_settings.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+</details>
+<details>
+<summary><b>Any other MCP client</b></summary>
+<p>Qoder, Kimi, Trae, Warp, Zed, JetBrains AI Assistant, Continue, OpenCode, LibreChat, Goose and the rest read a JSON block in the same shape. Point your client at this command and it will work:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;tg-ai&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/tg-ai/.venv/bin/python&quot;,
+      &quot;args&quot;: [&quot;/absolute/path/to/tg-ai/server.py&quot;],
+      &quot;cwd&quot;: &quot;/absolute/path/to/tg-ai&quot;
+    }
+  }
+}</code></pre>
+<p>Check your client's own documentation for the config file location and its wrapper key - a few use <code>servers</code> or <code>context_servers</code> instead of <code>mcpServers</code>. The transport is stdio; there is no HTTP mode.</p>
+</details>
+<h2 id="the-nine-tools"><a class="anchor" href="#the-nine-tools">#</a>The nine tools</h2>
+<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Purpose</th></tr></thead><tbody><tr><td><code>tg_send_message(target, message)</code></td><td>Send as you. Blocks sends to strangers, chunks long text, paces delivery</td></tr><tr><td><code>tg_get_recent_messages(target, limit=10)</code></td><td>Recent messages with one person, live</td></tr><tr><td><code>tg_get_unread_dialogs(limit=5)</code></td><td>Who has written to you</td></tr><tr><td><code>tg_search_local_history(query, target_username=None, limit=50)</code></td><td>Full-text search of the local archive</td></tr><tr><td><code>tg_add_contact(phone_or_username, first_name, last_name=&quot;&quot;)</code></td><td>Add a contact - the deliberate way to unblock a send to someone new</td></tr><tr><td><code>tg_get_dialog_persona(target, samples=12)</code></td><td>How you write to one person: stored persona, measured style, real samples. Read this before drafting a reply</td></tr><tr><td><code>tg_set_dialog_persona(target, addressing, tone, relationship, notes=&quot;&quot;, overwrite=False)</code></td><td>Record that style. Never silently overwrites</td></tr><tr><td><code>tg_list_dialog_personas(limit=20)</code></td><td>Which archived dialogs have a persona and which do not</td></tr><tr><td><code>tg_whoami()</code></td><td>Health check: account, session, database, archive</td></tr></tbody></table></div>
+<p>Full signatures and JSON schemas: <a href="https://github.com/anrysys/tg-ai/blob/main/docs/30-api/mcp-tools.md" target="_blank" rel="noopener">docs/30-api/mcp-tools.md</a>.</p>
+<h2 id="dialog-persona-replies-that-sound-like-you-not-like-a-model"><a class="anchor" href="#dialog-persona-replies-that-sound-like-you-not-like-a-model">#</a>Dialog Persona: replies that sound like you, not like a model</h2>
+<p>A reply drafted in a model's default register is obvious to anyone who knows you. You do not write to your boss the way you write to your partner, and you do not write to either the way ChatGPT writes to everyone.</p>
+<p>The <strong>Dialog Persona</strong> is a per-chat style profile. One persona per conversation, stored locally, put in front of the model <em>before</em> it drafts anything.</p>
+<h3 id="what-the-style-engine-measures"><a class="anchor" href="#what-the-style-engine-measures">#</a>What the style engine measures</h3>
+<p>Measured automatically from <strong>your own outgoing messages only</strong>, in any language, with no LLM involved. Eighteen signals:</p>
+<div class="table-wrap"><table><thead><tr><th>Group</th><th>What is captured</th></tr></thead><tbody><tr><td><strong>Length</strong></td><td>Median message length, the 90th percentile, your longest ever message, median word count, median sentence count</td></tr><tr><td><strong>Rhythm</strong></td><td>Share of short replies (25 characters or fewer - your "ok", "yes", "on it"), share of multi-line messages, and your <strong>burst rate</strong>: how often you fire a follow-up within 90 seconds instead of writing one long message</td></tr><tr><td><strong>Punctuation</strong></td><td>How often you end with a full stop, how often you use <code>?</code>, <code>!</code>, and <code>...</code></td></tr><tr><td><strong>Typography</strong></td><td>How often you start a message in lower case, your emoji rate, how often you share links</td></tr><tr><td><strong>Language</strong></td><td>Your script mix - Latin, Cyrillic, Greek and so on - with the share of each, so a reply comes back in the language and alphabet you actually use in that chat</td></tr><tr><td><strong>Window</strong></td><td>How many messages were measured, and the date range they cover</td></tr></tbody></table></div>
+<h3 id="what-your-agent-records"><a class="anchor" href="#what-your-agent-records">#</a>What your agent records</h3>
+<p>Four short, capped fields the measurements cannot infer - written by your agent after it reads your real messages, and the only place formality lives:</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Example</th><th>Cap</th></tr></thead><tbody><tr><td><code>addressing</code></td><td>Formal or informal address, and what you actually call them</td><td>79 chars</td></tr><tr><td><code>tone</code></td><td>"warm, brief, dry humour"</td><td>119 chars</td></tr><tr><td><code>relationship</code></td><td>"colleague, two years"</td><td>119 chars</td></tr><tr><td><code>notes</code></td><td>One further habit worth reproducing</td><td>239 chars</td></tr></tbody></table></div>
+<p>Formality and the formal/informal "you" distinction are deliberately left to the agent rather than pattern-matched in code: doing it in code would need a per-language pronoun lexicon, and this project has to work in every alphabet.</p>
+<h3 id="why-it-does-not-quietly-turn-into-a-bot"><a class="anchor" href="#why-it-does-not-quietly-turn-into-a-bot">#</a>Why it does not quietly turn into a bot</h3>
+<p>Four design decisions, each enforced by a test:</p>
+<ul><li><strong>Only your words are analysed.</strong> Every query filters on <code>is_outgoing</code>. The other person's messages never reach the analyser, so nothing they write can steer how you sound (<code>SPEC-PSN-002</code>).</li><li><strong>The persona can never learn from the AI's own drafts.</strong> Every message this server sends is archived exactly like one you typed. So the analysis window is <strong>frozen</strong> at creation: <code>baseline_message_id</code> is absent from the update statement entirely. Without that, a persona re-read after a few drafted replies would start modelling the model - and because model output is more consistent than human writing, it would read <em>better</em>, so the drift would be invisible (<code>SPEC-PSN-003</code>, <a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0008-dialog-persona-hybrid-authorship.md" target="_blank" rel="noopener">ADR-0008</a>).</li><li><strong>Distributions, not averages.</strong> Tell a model "your typical reply is 90 characters" and it writes 90 characters every single time - and that uniformity is itself the tell. It gets the median, the 90th percentile and the short-reply share instead, so it can vary the way a person does.</li><li><strong>It goes stale out loud.</strong> Freshness is judged on three axes - volume (50 new messages of yours), age (90 days) and measured drift (any of five ratios moving by 0.20, or your median length doubling) - and a stale verdict names which axis fired (<code>SPEC-PSN-005</code>).</li></ul>
+<p>A persona never blocks a send (<code>SPEC-PSN-008</code>), and its text fields are stripped of invisible characters and refused outright if they contain a URL, a handle, a tool name or a fence marker (<code>SPEC-PSN-006</code>).</p>
+<p>Nothing about your style is uploaded anywhere. The measurements are numbers in your own PostgreSQL.</p>
+<h2 id="use-cases"><a class="anchor" href="#use-cases">#</a>Use cases</h2>
+<div class="table-wrap"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><strong>Your searchable memory</strong></td><td>"Find the IP @vasya sent me last month and put it in <code>.env</code>" - instant full-text search across years of history</td></tr><tr><td><strong>Inbox triage</strong></td><td>Out of a four-hour deep-work block with 50 unread chats? Get a ranked summary without marking a single one read</td></tr><tr><td><strong>Reporting from the terminal</strong></td><td>"Send the PM a report on what we just changed in the schema" - the agent has the whole session in context</td></tr><tr><td><strong>Your own voice</strong></td><td>"Reply to Anna about Friday" - drafted from how you actually write to Anna</td></tr><tr><td><strong>Chained workflows</strong></td><td>"Tell the lead the schema is ready; when they approve, run the migrations"</td></tr></tbody></table></div>
+<p><strong>→ <a href="use-cases.html">Read the full use-case guide with copy-paste prompts</a></strong></p>
+<h2 id="keeping-your-account-safe"><a class="anchor" href="#keeping-your-account-safe">#</a>Keeping your account safe</h2>
+<p>Driving a personal account over MTProto puts you under Telegram's anti-spam enforcement. These protections are built in and tested, not optional:</p>
+<ul><li><strong>Messages to strangers are blocked outright.</strong> No history and not a contact means nothing is sent - you get a warning naming <code>tg_add_contact</code> as the next step. There is no <code>force</code> flag, on purpose.</li><li><strong>Long text is split</strong> into chunks under Telegram's 4096-character limit, on sentence boundaries, never mid-word.</li><li><strong>Sends are paced</strong> 2.5 seconds apart. Bursts are what rate limits react to.</li><li><strong>Rate limits are reported, not retried.</strong> <code>FloodWaitError</code> comes back as "we must wait N seconds" instead of a retry loop that extends the limit.</li><li><strong>Your session file is a full credential.</strong> It is git-ignored before it can exist and gets mode <code>0600</code>.</li><li><strong>Everything is local.</strong> The database binds to <code>127.0.0.1</code>; Telegram sees the same IP you always connect from.</li><li><strong>Message content is data, never instructions.</strong> Everything read from Telegram was written by other people; an instruction inside a message is something to report, never to act on.</li></ul>
+<p>Details: <a href="https://github.com/anrysys/tg-ai/blob/main/docs/70-ops/security.md" target="_blank" rel="noopener">docs/70-ops/security.md</a>.</p>
+<h2 id="how-it-works"><a class="anchor" href="#how-it-works">#</a>How it works</h2>
+<p>Three processes, because an MCP server speaks stdio and therefore cannot prompt for an SMS code:</p>
+<div class="table-wrap"><table><thead><tr><th>Process</th><th>Runs</th><th>Does</th></tr></thead><tbody><tr><td><code>auth.py</code></td><td>Once, in a terminal</td><td>Logs in, writes <code>tg_session.session</code></td></tr><tr><td><code>sync_db.py</code></td><td>On demand</td><td>Copies private chat history into PostgreSQL</td></tr><tr><td><code>server.py</code></td><td>Spawned by the agent</td><td>Serves the nine tools over stdio</td></tr></tbody></table></div>
+<p>Search hits PostgreSQL, not Telegram - which is why it is instant, unlimited, and carries no ban risk. The trade-off is that the archive is current as of the last <code>just tg-sync</code>; <code>tg_get_recent_messages</code> covers the gap by reading live.</p>
+<p>Full-text search uses a <code>simple</code> text search configuration plus a <code>pg_trgm</code> fallback, deliberately: the archive is multilingual, and any language-specific stemmer silently drops matches for the other half of your chats (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0003-postgres-fts-simple-plus-trigram.md" target="_blank" rel="noopener">ADR-0003</a>).</p>
+<p>Architecture: <a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/sad.md" target="_blank" rel="noopener">docs/20-architecture/sad.md</a>.</p>
+<h2 id="faq"><a class="anchor" href="#faq">#</a>FAQ</h2>
+<h3 id="is-this-a-telegram-bot"><a class="anchor" href="#is-this-a-telegram-bot">#</a>Is this a Telegram bot?</h3>
+<p>No. Telegram bots use the Bot API, cannot message people first, and are visibly bots. tg-ai drives your real user account over MTProto, so messages come from you and appear in your existing chats. That power is also why the Send Guard exists.</p>
+<h3 id="will-this-get-my-telegram-account-banned"><a class="anchor" href="#will-this-get-my-telegram-account-banned">#</a>Will this get my Telegram account banned?</h3>
+<p>Automating a personal account always carries risk, and nobody can promise otherwise - read the disclaimer above. tg-ai is built to keep you inside normal human behaviour: it refuses to message strangers, paces every chunk 2.5 seconds apart, never retries a flood wait, and runs from your own IP address. It sends to one person at a time and has no bulk or broadcast mode by design.</p>
+<h3 id="can-it-reply-to-people-automatically-while-i-sleep"><a class="anchor" href="#can-it-reply-to-people-automatically-while-i-sleep">#</a>Can it reply to people automatically while I sleep?</h3>
+<p>Not on its own. <strong>There is no LLM in this repository.</strong> tg-ai is a passive set of tools; it has no loop and no brain, and it sleeps until a client calls it. To build an autoresponder you point an autonomous agent at it - poll <code>tg_get_unread_dialogs</code>, read <code>tg_get_dialog_persona</code>, draft, then call <code>tg_send_message</code>. Every handle you need is here; the decision to pull them is yours.</p>
+<h3 id="does-my-chat-history-leave-my-machine"><a class="anchor" href="#does-my-chat-history-leave-my-machine">#</a>Does my chat history leave my machine?</h3>
+<p>No. The archive is a PostgreSQL container bound to <code>127.0.0.1:5434</code>, and the session file lives in the repository with mode <code>0600</code>. Nothing is uploaded anywhere. Your MCP client's model sees only what a tool returns when you ask it a question.</p>
+<h3 id="which-ai-clients-and-ides-are-supported"><a class="anchor" href="#which-ai-clients-and-ides-are-supported">#</a>Which AI clients and IDEs are supported?</h3>
+<p>Any program that speaks MCP over stdio - Claude Code, Claude Desktop, Cursor, Antigravity, Codex, Windsurf, VS Code with Copilot agent mode, Gemini CLI, Cline, Roo Code, Zed, Qoder, Kimi, Trae, Warp, JetBrains AI Assistant, Continue, OpenCode and others. See the install matrix above.</p>
+<h3 id="does-it-read-group-chats-and-channels"><a class="anchor" href="#does-it-read-group-chats-and-channels">#</a>Does it read group chats and channels?</h3>
+<p>No. Private one-on-one chats with people only. Groups, channels, bots and Telegram's own service account are excluded from the sync and from every tool.</p>
+<h3 id="what-is-the-model-context-protocol"><a class="anchor" href="#what-is-the-model-context-protocol">#</a>What is the Model Context Protocol?</h3>
+<p>MCP is an open standard for connecting AI assistants to external tools and data. An MCP server publishes tools; an MCP client - your IDE or agent - calls them. tg-ai is an MCP server, so it works in any client without a per-client plugin.</p>
+<h3 id="why-postgresql-and-not-sqlite"><a class="anchor" href="#why-postgresql-and-not-sqlite">#</a>Why PostgreSQL and not SQLite?</h3>
+<p>Because the point is search. Postgres gives generated <code>tsvector</code> columns, GIN indexes and <code>pg_trgm</code> for free, so a query over years of history returns in milliseconds and partial words still match (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0006-raw-sql-asyncpg-no-orm.md" target="_blank" rel="noopener">ADR-0006</a>).</p>
+<h3 id="does-it-store-my-messages-media-or-delete-anything"><a class="anchor" href="#does-it-store-my-messages-media-or-delete-anything">#</a>Does it store my messages' media, or delete anything?</h3>
+<p>Neither. Only message text is archived. The server never deletes or edits anything on your account, and reading never marks a chat as read.</p>
+<h2 id="commands"><a class="anchor" href="#commands">#</a>Commands</h2>
+<pre><code class="language-bash">just              # list everything
+just check        # ruff + black + pytest + docs checks
+just tg-sync      # refresh the archive (incremental)
+just tg-sync-targets @anna @bob   # archive only these people
+just tg-status    # account, session, database, archive health
+just db-psql      # psql shell into the archive</code></pre>
+<h2 id="documentation"><a class="anchor" href="#documentation">#</a>Documentation</h2>
+<p>Start at <a href="https://github.com/anrysys/tg-ai/blob/main/docs/README.md" target="_blank" rel="noopener">docs/README.md</a> - it routes to everything.</p>
+<p>Working on the code? Read <a href="https://github.com/anrysys/tg-ai/blob/main/AGENTS.md" target="_blank" rel="noopener">AGENTS.md</a> first; it is the authority on how changes are made here.</p>
+<h2 id="scope"><a class="anchor" href="#scope">#</a>Scope</h2>
+<p>Private 1-on-1 text chats with people. Not groups, not channels, not bots, not media, and nothing that deletes or edits messages on your account. See the non-goals in <a href="https://github.com/anrysys/tg-ai/blob/main/docs/10-product/prd.md" target="_blank" rel="noopener">docs/10-product/prd.md</a>.</p>
+<h2 id="contributing"><a class="anchor" href="#contributing">#</a>Contributing</h2>
+<p>Issues and pull requests are welcome. Read <a href="https://github.com/anrysys/tg-ai/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a> and <a href="https://github.com/anrysys/tg-ai/blob/main/AGENTS.md" target="_blank" rel="noopener">AGENTS.md</a> first - this repository has firm rules about the Send Guard and about documentation, and a change that weakens either will be declined.</p>
+<h2 id="license"><a class="anchor" href="#license">#</a>License</h2>
+<p>MIT. See <a href="https://github.com/anrysys/tg-ai/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a>.</p>
+</main>
+<footer>
+  <p>MIT licensed. Built for one personal Telegram account on one machine.
+  <a href="https://github.com/anrysys/tg-ai" target="_blank" rel="noopener">Source on GitHub</a> ·
+  <a href="https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/README.md" target="_blank" rel="noopener">Russian</a></p>
+</footer>
+</body>
+</html>
