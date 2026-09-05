@@ -45,4 +45,4 @@ one at the moment you write the thing, and record it here in the same change.
 | `SPEC-SEC-001` .. `SPEC-SEC-005` | In use |
 | `ADR-0000` .. `ADR-0008` | In use (`0000` is the template) |
 | `RISK-01` .. `RISK-07` | In use |
-| `TASK-001` .. `TASK-011` | In use |
+| `TASK-001` .. `TASK-013` | In use |

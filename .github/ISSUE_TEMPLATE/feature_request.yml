@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a capability or a change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the non-goals in
+        [docs/10-product/prd.md](https://github.com/anrysys/tg-ai/blob/main/docs/10-product/prd.md)
+        first. Groups, channels, media, bulk sending, remote access and anything
+        that deletes or edits messages are deliberately out of scope, and
+        weakening the Send Guard is not on the table.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: >-
+        Decisions here are recorded as ADRs together with their rejected
+        alternatives, so this section carries real weight.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require messaging people the account has no relationship with
+          required: true
+        - label: I have read the non-goals in the PRD
+          required: true

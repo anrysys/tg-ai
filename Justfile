@@ -167,10 +167,30 @@ docs-links:
 # Everything documentation CI enforces.
 docs-check: docs-english docs-links
 
+# --- site ----------------------------------------------------------------
+
+# Regenerate the GitHub Pages site and llms-full.txt from the markdown.
+site-build:
+    {{ python }} scripts/build_site.py
+
+# Fail if the committed site is not what the markdown currently renders to.
+# Generated output that nobody regenerates is just a second copy that drifts.
+site-check:
+    @{{ python }} scripts/build_site.py --check
+
+# Re-render the 1280x640 social preview from the logo. Needs rsvg-convert and
+# ImageMagick, so it is deliberately not part of `just check`.
+site-og:
+    rsvg-convert -w 1280 docs/assets/logo.svg -o /tmp/tg-ai-og-src.png
+    convert /tmp/tg-ai-og-src.png -background '#080C17' -gravity center \
+        -extent 1280x640 -strip site/og.png
+    @rm -f /tmp/tg-ai-og-src.png
+    @echo "site/og.png regenerated"
+
 # --- aggregate -----------------------------------------------------------
 
 # Run every check CI runs.
-check: docs-check py-check
+check: docs-check site-check py-check
 
 # Register this server with Claude Code (user scope).
 mcp-add:

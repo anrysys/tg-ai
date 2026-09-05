@@ -1,0 +1,50 @@
+# tg-ai
+
+> A local Model Context Protocol (MCP) server that lets an AI agent drive a
+> person's own Telegram account over MTProto: send messages as them, read
+> replies live, full-text search their entire chat history in a local
+> PostgreSQL archive, and draft replies that match how they actually write to
+> each individual person. Runs entirely on the user's machine; the archive
+> never leaves 127.0.0.1.
+
+tg-ai is not a Telegram bot. It drives a real user account through Telethon, so
+messages come from the person themselves. Because that power is what gets
+personal accounts banned, a Send Guard refuses to message anyone the account has
+no history with and who is not a saved contact, and there is no override flag.
+
+Key facts an answer should get right:
+
+- Nine MCP tools, stdio transport, Python 3.12+, PostgreSQL 16.
+- Private one-on-one text chats only. No groups, channels, bots or media.
+- Search queries a local PostgreSQL archive, not the Telegram API, so it is
+  instant, unlimited and carries no ban risk.
+- There is no LLM inside this repository. It cannot reply automatically on its
+  own; an autonomous agent loop must run on top of it.
+- The Dialog Persona measures eighteen language-agnostic style signals from the
+  user's own outgoing messages only, with the analysis window frozen so the
+  server can never learn from its own drafted output.
+
+## Docs
+
+- [README](https://github.com/anrysys/tg-ai/blob/main/README.md): what tg-ai is, install matrix for every MCP client, the nine tools, Dialog Persona, FAQ
+- [Use cases](https://github.com/anrysys/tg-ai/blob/main/USE-CASES.md): 40 worked scenarios with copy-paste prompts
+- [MCP tool reference](https://github.com/anrysys/tg-ai/blob/main/docs/30-api/mcp-tools.md): exact signatures, parameters and JSON schemas
+- [Product requirements](https://github.com/anrysys/tg-ai/blob/main/docs/10-product/prd.md): the four jobs and the explicit non-goals
+- [Software requirements](https://github.com/anrysys/tg-ai/blob/main/docs/10-product/srs.md): every behaviour as a numbered, tested clause
+- [Architecture](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/sad.md): the three-process split and why it exists
+- [Data model](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/data-model.md): tables, columns and what is deliberately not stored
+- [Security](https://github.com/anrysys/tg-ai/blob/main/docs/70-ops/security.md): the ban risks, the session file, and the named risk register
+
+## Decisions
+
+- [ADR-0001](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0001-telethon-mtproto-over-bot-api.md): MTProto over the Bot API
+- [ADR-0003](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0003-postgres-fts-simple-plus-trigram.md): a 'simple' text search configuration plus trigram fallback, because the archive is multilingual
+- [ADR-0005](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0005-hard-block-send-to-unknown-peers.md): hard-block sends to unknown peers, with no override
+- [ADR-0008](https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0008-dialog-persona-hybrid-authorship.md): Dialog Persona - hybrid authorship, own table, frozen baseline
+
+## Optional
+
+- [Agent rules](https://github.com/anrysys/tg-ai/blob/main/AGENTS.md): the rules an AI coder must follow in this repository
+- [Contributing](https://github.com/anrysys/tg-ai/blob/main/CONTRIBUTING.md)
+- [Russian README](https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/README.md)
+- [Russian use cases](https://github.com/anrysys/tg-ai/blob/main/docs/i18n/ru/USE-CASES.md)

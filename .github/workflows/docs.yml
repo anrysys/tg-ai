@@ -45,3 +45,18 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@v16
         with:
           globs: "**/*.md"
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # site/ and llms-full.txt are generated from README.md and USE-CASES.md.
+      # Generated output that nobody regenerates becomes a second, wrong copy of
+      # the facts - which is exactly what ADR-0007 exists to prevent.
+      - name: Fail if the published site is stale
+        run: python scripts/build_site.py --check

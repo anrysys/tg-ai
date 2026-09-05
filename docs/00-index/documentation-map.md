@@ -3,7 +3,7 @@ id: DOC-DOC-MAP
 title: Documentation map
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [DOC-DOCS-PROTOCOL, DOC-ROUTER]
 ---
 
@@ -40,6 +40,8 @@ change and are therefore omitted from each row.
 | Added or removed a user-facing capability | [prd.md](../10-product/prd.md) use case, [roadmap.md](../60-delivery/roadmap.md) |
 | Added or renamed a module under `tg_ai/` | [sad.md](../20-architecture/sad.md) module tree, [qa-and-testing.md](../50-process/qa-and-testing.md) coverage table |
 | Learned a recovery procedure the hard way | a new file under [runbooks/](../70-ops/runbooks/), linked from its README |
+| Changed the public pitch: the value proposition, tool list, install steps or FAQ | [README.md](../../README.md), [USE-CASES.md](../../USE-CASES.md), the matching files under [i18n/ru/](../i18n/ru/README.md), then `just site-build` to regenerate `site/` and `llms-full.txt` |
+| Changed anything an AI crawler or MCP directory reads | [llms.txt](../../llms.txt), [server.json](../../server.json), [CITATION.cff](../../CITATION.cff), then `just site-build` |
 
 ## When your change matches no row
 

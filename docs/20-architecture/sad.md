@@ -70,9 +70,10 @@ account - the composition happens in `server.py`, at the entrypoint.
 ### `server.py` writes to the Archive, but only to one table
 
 The diagram above shows `sync_db.py` as the writer and `server.py` as a reader.
-Since ADR-0008 that is no longer quite true: `tg_set_dialog_persona` writes, and
-`tg_get_dialog_persona` refreshes the measurements. It writes to
-`dialog_personas` and to nothing else. `dialogs` and `messages` remain owned by
+Since ADR-0008 that is no longer quite true: `tg_set_dialog_persona` writes.
+`tg_get_dialog_persona` re-measures the frozen window on every call but stores
+nothing, so it stays a reader. Writes go to `dialog_personas` and to nothing
+else. `dialogs` and `messages` remain owned by
 `sync_db.py`, which is what lets a resync run without coordinating with a live
 server.
 

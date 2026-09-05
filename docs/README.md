@@ -3,7 +3,7 @@ id: DOC-ROUTER
 title: Documentation Router
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-05
 related: [AGENTS, DOC-GLOSSARY, DOC-DOC-MAP, DOC-STATUS]
 ---
 
@@ -21,6 +21,8 @@ this page is orphaned and must be either linked or deleted.
 | Your question | Document |
 | --- | --- |
 | What is this project and how do I run it? | [README](../README.md) |
+| What can I actually do with it, with example prompts? | [Use cases](../USE-CASES.md) |
+| Where is the Russian documentation? | [RU README](i18n/ru/README.md), [RU use cases](i18n/ru/USE-CASES.md) |
 | What are the rules I must follow while coding? | [AGENTS.md](../AGENTS.md) |
 | What is this concept called in this codebase? | [Glossary](00-index/glossary.md) |
 | Where does the project stand right now? | [Status](00-index/status.md) |
@@ -63,3 +65,4 @@ tokens and gains nothing.
 | `60-delivery/` | What is planned and what is next |
 | `70-ops/` | Running it, securing it, fixing it |
 | `90-history/` | What happened |
+| `i18n/` | Translations. The only place non-English text may live |

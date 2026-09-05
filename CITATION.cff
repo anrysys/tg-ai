@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+title: "tg-ai: a local Telegram MCP server for AI agents"
+message: "If you use this software, please cite it using these metadata."
+type: software
+authors:
+  - alias: anrysys
+    website: "https://github.com/anrysys"
+repository-code: "https://github.com/anrysys/tg-ai"
+url: "https://anrysys.github.io/tg-ai/"
+abstract: >-
+  tg-ai is a local Model Context Protocol (MCP) server that gives an AI agent
+  controlled access to a person's own Telegram account over MTProto. It can send
+  messages as the account owner, read replies live, run full-text search across a
+  local PostgreSQL archive of the account's private chat history, and supply a
+  per-conversation writing-style profile (the Dialog Persona) so drafted replies
+  match how the owner actually writes to each individual correspondent. Anti-ban
+  guardrails, including a non-overridable refusal to message strangers, are part
+  of the design rather than a configuration option.
+keywords:
+  - model-context-protocol
+  - mcp-server
+  - telegram
+  - mtproto
+  - ai-agents
+  - llm-tools
+  - full-text-search
+  - postgresql
+  - local-first
+  - writing-style
+license: MIT
+version: 0.1.0
+date-released: "2026-09-05"

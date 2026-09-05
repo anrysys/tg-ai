@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/anrysys/tg-ai/security/advisories/new
+    about: Report privately. Never open a public issue for a security problem.
+  - name: Documentation
+    url: https://github.com/anrysys/tg-ai/blob/main/docs/README.md
+    about: The docs router points at the answer for most questions.
+  - name: Use cases and prompt recipes
+    url: https://github.com/anrysys/tg-ai/blob/main/USE-CASES.md
+    about: Forty worked scenarios with copy-paste prompts.
