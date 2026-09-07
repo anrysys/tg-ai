@@ -29,7 +29,20 @@ CACHE_TTL_SECONDS = 300
 
 
 def build_client(config: Config, *, session_base: Path | None = None) -> TelegramClient:
-    """Create a Telethon client bound to a session file.
+    """Create a Telethon client bound to a session file (SPEC-SEC-007, SPEC-SEC-008).
+
+    This is the only construction site in the project. ``auth.py``,
+    ``server.py`` and ``sync_db.py`` all come through here, which is what
+    makes the Client Identity below identical on every connection - the
+    property that actually matters, far more than the strings themselves
+    (ADR-0009).
+
+    Telethon's defaults are tuned for convenience, not for a personal account
+    under observation, so every parameter that matters is pinned explicitly
+    rather than inherited. Do not add a Telethon event handler anywhere in
+    this codebase: ``receive_updates=False`` means handlers silently never
+    fire, and re-enabling updates to "fix" that would subscribe the account to
+    every message in every group it belongs to (ADR-0009).
 
     Args:
         config: Validated configuration.
@@ -37,7 +50,48 @@ def build_client(config: Config, *, session_base: Path | None = None) -> Telegra
             to the primary session; ``sync_db.py`` passes the clone.
     """
     base = session_base if session_base is not None else config.session_path
-    return TelegramClient(str(base), config.api_id, config.api_hash)
+    return TelegramClient(
+        str(base),
+        config.api_id,
+        config.api_hash,
+        # --- Client Identity -------------------------------------------
+        # Honest and stable, never impersonating an official client. Telegram
+        # already knows this client is unofficial because it knows the api_id.
+        device_model=config.device_model,
+        system_version=config.system_version,
+        app_version=config.app_version,
+        lang_code=config.lang_code,
+        system_lang_code=config.system_lang_code,
+        # --- The constructor contract ----------------------------------
+        # The zero here is load-bearing, not a placeholder. Telethon's default
+        # of 60 makes it sleep through - that is, silently retry - every flood
+        # wait of 60 seconds or less. Scraping-induced waits are typically
+        # 5-30 seconds, so with the default every one of them is invisible:
+        # the FloodWaitError handlers in this project would never fire, and
+        # AGENTS.md's rule against retrying a flood wait would be violated
+        # inside the library. Zero makes every wait surface as an exception,
+        # so it is counted, reported, and fed to the kill switch.
+        flood_sleep_threshold=0,
+        # No real-time push. The server reads on demand; with group support
+        # this would otherwise stream every message from every group.
+        receive_updates=False,
+        # Never enable. On connect it calls updates.getDifference, which is a
+        # bulk history fetch and the exact flood risk receive_updates=False
+        # exists to avoid.
+        catch_up=False,
+        # A failing request must not silently become five requests.
+        request_retries=1,
+        # Every reconnect replays initConnection, so a network blip must not
+        # produce a handshake burst.
+        connection_retries=2,
+        retry_delay=5,
+        auto_reconnect=True,
+        # Group history fills this cache with strangers' ids and access
+        # hashes, and the cache lives in the session file that clone_session()
+        # copies on every sync run. Cap it: this project has no business
+        # accumulating access hashes for people the user never spoke to.
+        entity_cache_limit=500,
+    )
 
 
 def secure_session_file(path: Path) -> None:
