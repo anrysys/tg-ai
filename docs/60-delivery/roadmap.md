@@ -3,7 +3,7 @@ id: DOC-ROADMAP
 title: Roadmap
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-07
 related: [DOC-STATUS, DOC-TASK-QUEUE, DOC-PRD]
 ---
 
@@ -100,6 +100,25 @@ Per-Dialog style so a drafted reply sounds like the user
 
 ---
 
+## M7 - Groups and channels 🟨 code complete, live acceptance pending
+
+Groups and channels, behind a safety envelope that also fixed four defects in
+the pre-existing private-chat code
+([ADR-0009](../20-architecture/adr/0009-groups-and-channels.md),
+[ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md)).
+
+| Item | State |
+| --- | --- |
+| Client Identity and the Telethon constructor contract | ✅ `SPEC-SEC-007`, `SPEC-SEC-008` |
+| Connection lock, one per authorization key | ✅ `SPEC-SEC-010` |
+| Persisted RPC limiter, budgets and flood kill switch | ✅ `SPEC-LIM-001` .. `SPEC-LIM-007` |
+| Peer model: groups, channels, posting rights | ✅ `SPEC-SND-001`, `SPEC-SND-008` |
+| Opt-in group sync, capped at one request per target | ✅ `SPEC-SYNC-007` |
+| Group reads with persisted cooldown and daily cap | ✅ `SPEC-RCV-003` |
+| Personas disabled for groups and channels | ✅ `SPEC-PSN-009` |
+| Blacklisted operations, enforced by a source scan | ✅ `SPEC-LIM-006` |
+| Sustained live use over days, watching the flood log | ⬜ requires the user |
+
 ## Beyond M5 - not scheduled
 
 Each needs a PRD change and an ADR before any code.
@@ -108,5 +127,4 @@ Each needs a PRD change and an ADR before any code.
 | --- | --- |
 | Scheduled background sync (systemd timer) | Deciding whether a stale archive is a real problem in practice |
 | Media and file archiving | Storage strategy; currently a PRD non-goal |
-| Group and channel archiving | PRD non-goal; would dominate the archive by volume |
 | Semantic search over the archive | Requires an embedding pipeline; the trigram fallback may already be sufficient |

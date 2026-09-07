@@ -3,7 +3,7 @@ id: DOC-SAD
 title: Software architecture
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-SRS, DOC-DATA-MODEL, DOC-ADR-INDEX, DOC-DEPLOY]
 ---
 
@@ -52,8 +52,8 @@ single fact produces the process split ([ADR-0002](adr/0002-three-process-split-
 server.py / sync_db.py / auth.py     entrypoints: orchestration and I/O only
         │
         ├── tg_ai/formatting.py      data -> agent-readable text
-        ├── tg_ai/safety.py          chunking, pacing, persona sanitisation (pure)
-        ├── tg_ai/tg_client.py       Telethon: peers, contacts, sessions
+        ├── tg_ai/safety.py          chunking, pacing, budgets, quiet window (pure)
+        ├── tg_ai/tg_client.py       Telethon: peers, contacts, sessions, the RPC limiter
         ├── tg_ai/db.py              asyncpg: raw SQL, no ORM (ADR-0006)
         │       └── tg_ai/persona.py style measurement (pure, stdlib only)
         └── tg_ai/config.py          the only module that reads the environment
@@ -66,6 +66,26 @@ the style measurement unit-testable without a network or a database.
 `db.py` and `tg_client.py` are peers and must never import each other. Where
 both are needed - resolving a Target against the Archive rather than the live
 account - the composition happens in `server.py`, at the entrypoint.
+
+### How the RPC limiter spans that boundary without crossing it
+
+The global limiter (`SPEC-LIM-001`) needs two things that live on opposite sides
+of that line: the Telethon client, and rate-limit state in PostgreSQL. It is
+split rather than allowed to import across:
+
+- `tg_ai/safety.py` holds the **decisions** - is this inside the quiet window,
+  is the budget spent, does this flood count trip the switch - as pure functions
+  over numbers someone else fetched. That is what keeps them unit-testable.
+- `tg_ai/tg_client.py` declares an `RpcLedger` `Protocol` next to its only
+  consumer, and `RpcGuard` calls it. The Protocol is structural, so nothing is
+  imported in either direction.
+- `tg_ai/db.py` provides `PostgresRpcLedger`, which satisfies that Protocol
+  without knowing it exists.
+- `server.py` and `sync_db.py` wire the two together, as entrypoints do.
+
+`RpcGuard` is a plain object taking an injected clock and sleep, so the offline
+test suite can exercise pacing, budgets and the kill switch without constructing
+a client, a session file or a database.
 
 ### `server.py` writes to the Archive, but only to one table
 
@@ -81,10 +101,17 @@ server.
 
 Telethon stores its session in SQLite. Two processes writing one file produce
 `database is locked`, and the file holds the only credential the project has.
-`sync_db.py` therefore copies it and connects with the clone. The auth key is
-the same, so Telegram sees one account with two connections - which it
-permits - while the two processes never contend for the file
+`sync_db.py` therefore copies it and connects with the clone
 ([ADR-0004](adr/0004-session-file-clone-for-sync.md)).
+
+**The clone does not make concurrent access safe on its own.** It shares the
+primary's authorization key, and Telegram answers parallel sessions past its
+limit with `AUTH_KEY_DUPLICATED` - at which point the login is already gone. So
+every process takes an exclusive `flock` on `<session_name>.lock`, keyed to the
+primary session name, before connecting; the loser exits rather than waiting
+([ADR-0010](adr/0010-one-connection-per-authorization-key.md)). `sync_db.py`
+takes it before cloning, so a locked-out run also cannot copy a file the server
+is mid-write on.
 
 ## Selecting what to sync
 
@@ -96,17 +123,25 @@ Three selection modes exist, in increasing cost:
 
 | Mode | Selects | API cost |
 | --- | --- | --- |
-| `--targets T [T ...]` | Dialogs matching the named people | The dialog list only. No peer resolution |
+| `--targets T [T ...]` | Dialogs matching the named Peers, **including Groups and Channels** | The dialog list, plus one `getHistory` per target |
 | default / `--full` | Every archivable private Dialog | The dialog list only |
-| `--dialog T` | One peer, resolved through the API | A cold `ResolveUsername` if the peer is unknown |
+| `--dialog T` | One person, resolved through the API | A cold `ResolveUsername` if the peer is unknown |
 
-`--targets` filters the list `SPEC-SYNC-001` already produced, so it can only
-narrow that list - a bot or channel named as a target stays excluded. It is the
+`--targets` filters the list the dialog walk already produced, so it can only
+narrow it - a bot or a Group the account has left stays excluded. It is the
 intended first step on a large account: archive the people who matter, then let
 a plain `just tg-sync` catch up with the rest in the background.
 
+It is also the **only** way to reach a Group or Channel. A default run archives
+private chats only, and each Group target costs exactly one `getHistory` of 100
+messages, with at most 5 targets per run and 20 reads per rolling day
+(`SPEC-SYNC-007`).
+
 `--dialog` is the escape hatch for someone the account has no Dialog with yet,
-and is the only mode that resolves a peer through the API.
+and is the only mode that resolves a peer through the API. It stays **user-only
+by construction**: `resolve_peer` permits cold resolution only for a caller that
+will accept nothing but a `User`, so this mode cannot reach a Group or Channel
+even by accident (`SPEC-SND-006`).
 
 ## Why the archive is separate from the live account
 

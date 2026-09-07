@@ -13,8 +13,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import random
 import unicodedata
 from collections.abc import Awaitable, Callable
+from datetime import datetime
+from datetime import time as dt_time
 from typing import ParamSpec
 
 from telethon import errors
@@ -31,6 +34,243 @@ CHUNK_DELAY_SECONDS = 2.5
 
 #: Seconds to wait between dialogs while dumping history.
 SYNC_DIALOG_DELAY_SECONDS = 1.0
+
+#: Seconds to wait between two group or channel reads. Longer than the private
+#: equivalent because jumping between channels faster than a human can click
+#: is what anti-bot heuristics look for.
+CHANNEL_SYNC_DELAY_SECONDS = 15.0
+
+#: Minimum gap between any two RPCs, of any kind, from any process. Telegram's
+#: limits are per account across all methods, so the pacing has to be global
+#: rather than per call site (SPEC-LIM-001).
+MIN_RPC_GAP_SECONDS = 1.5
+
+#: Rolling RPC budgets. Deliberately far below anything Telegram rate-limits:
+#: the point is not to stay under the limit, it is to keep the account's daily
+#: volume in the range a person produces. A first full backfill can exhaust the
+#: daily budget and resume tomorrow - the Sync Cursor makes that lossless, so it
+#: costs patience rather than data (SPEC-LIM-002).
+RPC_BUDGET_PER_HOUR = 60
+RPC_BUDGET_PER_DAY = 500
+
+#: Group and channel volume caps (SPEC-SYNC-007, SPEC-RCV-003).
+GROUP_FETCH_LIMIT = 100
+GROUP_TARGETS_PER_RUN = 5
+GROUP_READS_PER_DAY = 20
+GROUP_READ_COOLDOWN_SECONDS = 300
+
+#: Flood events inside FLOOD_TRIP_WINDOW_SECONDS that trip the kill switch, and
+#: how long a trip lasts. Frequency is what feeds Telegram's risk score, so the
+#: count matters more than any single wait (SPEC-LIM-003).
+FLOOD_TRIP_COUNT = 3
+FLOOD_TRIP_WINDOW_SECONDS = 3600
+KILL_SWITCH_COOLDOWN_SECONDS = 24 * 3600
+
+#: Scope names in `api_call_log`. Separate scopes because they are counted
+#: against different budgets: every RPC, versus the far scarcer group read.
+RPC_SCOPE = "rpc"
+GROUP_READ_SCOPE = "group_read"
+
+#: Absolute ceiling on Telegram-touching tool calls in one server process. This
+#: is the backstop for a runaway agent loop, which is a different failure from
+#: the rolling budgets: an LLM will call a tool as fast as the tool permits
+#: (SPEC-LIM-007).
+MAX_TELEGRAM_TOOL_CALLS = 200
+
+
+def jittered(delay: float) -> float:
+    """Add non-negative jitter to a reviewed delay (SPEC-LIM-005).
+
+    Fixed, perfectly repeating intervals are a bot-detection signal, so every
+    delay in this project is jittered. The jitter is **additive only**.
+
+    A symmetric formula such as ``delay * (1 + random.uniform(-0.25, 0.25))``
+    would be wrong here: it returns less than ``delay`` half the time, which is
+    exactly the "lowering CHUNK_DELAY_SECONDS / SYNC_DIALOG_DELAY_SECONDS" that
+    AGENTS.md forbids. The reviewed constant is a floor, not a midpoint.
+    """
+    if delay <= 0:
+        return 0.0
+    return delay + random.uniform(0, 0.5 * delay)
+
+
+def in_quiet_window(moment: dt_time, start: dt_time, end: dt_time) -> bool:
+    """Whether ``moment`` falls inside the configured quiet window.
+
+    The window is allowed to wrap midnight, which is the normal case for a
+    sleeping human: ``23:00-07:00`` is one window, not two.
+    """
+    if start <= end:
+        return start <= moment < end
+    return moment >= start or moment < end
+
+
+def quiet_window_message(start: dt_time, end: dt_time) -> str:
+    """The refusal an agent sees during the quiet window (SPEC-LIM-004)."""
+    return (
+        f"Outside the configured activity window (TG_QUIET_HOURS, "
+        f"{start:%H:%M}-{end:%H:%M} local). Nothing was requested from "
+        "Telegram. Tools that read only the local archive still work - "
+        "tg_search_local_history and the persona tools are unaffected."
+    )
+
+
+def budget_message(hourly_used: int, daily_used: int) -> str | None:
+    """Why this RPC must not happen, or ``None`` when there is headroom.
+
+    Returns a message rather than sleeping. Queueing behind an exhausted budget
+    would turn a volume cap into a delay, and the whole point is that the calls
+    do not happen at all (SPEC-LIM-002).
+    """
+    if daily_used >= RPC_BUDGET_PER_DAY:
+        return (
+            f"Daily Telegram request budget exhausted ({daily_used}/"
+            f"{RPC_BUDGET_PER_DAY} in the last 24 hours). It refills gradually "
+            "as the oldest calls age out; nothing was requested. This budget "
+            "exists to keep the account's daily volume in a human range."
+        )
+    if hourly_used >= RPC_BUDGET_PER_HOUR:
+        return (
+            f"Hourly Telegram request budget exhausted ({hourly_used}/"
+            f"{RPC_BUDGET_PER_HOUR} in the last hour). It refills gradually as "
+            "the oldest calls age out; nothing was requested. Do not poll - "
+            "wait, or use tg_search_local_history, which never touches Telegram."
+        )
+    return None
+
+
+#: telethon 1.36.0 defines no FloodPremiumWaitError - there is no FLOOD_PREMIUM
+#: string anywhere in the package - so it is looked up rather than imported. A
+#: later Telethon that adds the class is picked up automatically, and until then
+#: the wire string below catches it. A premium flood wait that went uncounted
+#: would silently weaken the kill switch, which is the one control that must not
+#: have a blind spot.
+_FLOOD_PREMIUM_ERROR = getattr(errors, "FloodPremiumWaitError", None)
+
+_FLOOD_ERROR_TYPES: tuple[type[BaseException], ...] = tuple(
+    error
+    for error in (errors.FloodWaitError, errors.SlowModeWaitError, _FLOOD_PREMIUM_ERROR)
+    if error is not None
+)
+
+
+def is_flood_error(exc: BaseException) -> bool:
+    """Whether this exception counts toward the kill switch (SPEC-LIM-003).
+
+    Covers flood waits, slow-mode waits and premium flood waits. ``PeerFloodError``
+    is deliberately excluded: it is an escalation handled separately, not one
+    more data point in a rolling count.
+    """
+    if isinstance(exc, errors.SlowModeWaitError):
+        # Not a subclass of FloodWaitError - a sibling - so it needs its own
+        # branch or it falls through untranslated. Slow mode is a property of
+        # the group, not a punishment: the correct response is to say how long
+        # and stop, never to retry (SPEC-SND-004).
+        return (
+            f"ERROR: This group has slow mode on and will not accept another "
+            f"message for {exc.seconds} seconds. Nothing was sent. Do not "
+            "retry in a loop - wait, or say something once."
+        )
+
+    if _FLOOD_PREMIUM_ERROR is not None and isinstance(exc, _FLOOD_PREMIUM_ERROR):
+        return "ERROR: " + FLOOD_WAIT_TEMPLATE.format(seconds=getattr(exc, "seconds", 0))
+
+    if isinstance(exc, errors.ApiIdPublishedFloodError):
+        # The api_id in use is a published one. Telegram treats the account
+        # behind a published api_id as an abuser, so this is not a wait.
+        return (
+            "ERROR: Telegram reports that this api_id is a published one "
+            "(API_ID_PUBLISHED_FLOOD). Stop using this application immediately "
+            "and tell the user: they must obtain their own api_id and api_hash "
+            "at https://my.telegram.org. A borrowed or sample api_id makes the "
+            "account behind it look like an abuser."
+        )
+
+    if isinstance(exc, errors.PhoneNumberBannedError):
+        return (
+            "ERROR: Telegram has banned this phone number. Nothing this server "
+            "does can change that. Stop and tell the user; an appeal goes "
+            "through Telegram support, from the official app."
+        )
+
+    if isinstance(exc, errors.UserBannedInChannelError):
+        # A spam-system signal, not a per-chat permission problem.
+        return (
+            "ERROR: This account is banned from writing in public groups and "
+            "channels. That is Telegram's anti-spam system acting on the whole "
+            "account, not this one chat. Stop sending, and tell the user to "
+            "check the account with @SpamBot from the official Telegram app."
+        )
+
+    if isinstance(exc, errors.ChatGuestSendForbiddenError):
+        return (
+            "ERROR: You must join this group before you can write in it. "
+            "Nothing was sent, and this server will not join it for you - "
+            "auto-joining is exactly the behaviour that gets personal accounts "
+            "flagged. Join it in the Telegram app if you want to reply there."
+        )
+
+    if isinstance(exc, errors.ChatAdminRequiredError):
+        return (
+            "ERROR: This action needs admin rights in that chat and the account "
+            "does not have them. Nothing was done, and there is nothing to retry."
+        )
+
+    if isinstance(exc, errors.ChannelPrivateError | errors.ChannelInvalidError):
+        return (
+            "ERROR: That channel is private, gone, or the account is not a "
+            "member of it. Nothing was requested. This server never joins a "
+            "channel to get access - ask the user to join it in the Telegram "
+            "app if they want it read."
+        )
+
+    if isinstance(exc, errors.TakeoutInitDelayError):
+        return (
+            f"ERROR: Telegram wants the data export confirmed from the official "
+            f"app before it will start, and is asking to wait {exc.seconds} "
+            "seconds. This project does not use the takeout API, so seeing this "
+            "means something unexpected requested one."
+        )
+
+    if isinstance(exc, errors.PeerFloodError):
+        return False
+    if _FLOOD_ERROR_TYPES and isinstance(exc, _FLOOD_ERROR_TYPES):
+        return True
+    return "FLOOD_PREMIUM_WAIT" in str(exc)
+
+
+def flood_trips_kill_switch(recent_flood_count: int) -> bool:
+    """Whether this many flood events in the rolling window trips the switch."""
+    return recent_flood_count >= FLOOD_TRIP_COUNT
+
+
+def kill_switch_message(
+    *, tripped_at: datetime, reason: str, expires_at: datetime | None, now: datetime
+) -> str | None:
+    """The refusal for an active kill switch, or ``None`` when it has lapsed.
+
+    ``expires_at is None`` means indefinite: a ``PeerFloodError`` is an
+    escalation rather than a cooldown, and only the account owner clears it.
+    """
+    if expires_at is None:
+        return (
+            "Telegram safety kill switch is ON, indefinitely, since "
+            f"{tripped_at:%Y-%m-%d %H:%M} UTC: {reason}. This is an escalation, "
+            "not a cooldown - it does not expire on its own. Check the account "
+            "by messaging @SpamBot from the official Telegram app, and do not "
+            "automate an appeal. Clear it deliberately with "
+            "`just tg-killswitch-clear` once the account is known good."
+        )
+    if now >= expires_at:
+        return None
+    remaining = int((expires_at - now).total_seconds() // 60)
+    return (
+        f"Telegram safety kill switch is ON since {tripped_at:%Y-%m-%d %H:%M} "
+        f"UTC: {reason}. Nothing will be requested from Telegram for another "
+        f"{remaining} minute(s). Do not retry and do not restart the server - "
+        "the limit is on the account, not on this process."
+    )
+
 
 #: A chunk shorter than this fraction of the limit looks like spam-shaped
 #: dribble, so a break point is only accepted past this offset.
@@ -123,8 +363,12 @@ def _find_break(rest: str, limit: int, min_break: int) -> tuple[int, int]:
 
 
 async def sleep_between_chunks() -> None:
-    """Pause between two chunks of the same logical message (SPEC-SND-003)."""
-    await asyncio.sleep(CHUNK_DELAY_SECONDS)
+    """Pause between two chunks of the same logical message (SPEC-SND-003).
+
+    Jittered, like every other delay here: a burst spaced at exactly 2.5s
+    intervals is itself a pattern (SPEC-LIM-005).
+    """
+    await asyncio.sleep(jittered(CHUNK_DELAY_SECONDS))
 
 
 def describe_telegram_error(exc: BaseException) -> str | None:
@@ -135,6 +379,77 @@ def describe_telegram_error(exc: BaseException) -> str | None:
     """
     if isinstance(exc, errors.FloodWaitError):
         return "ERROR: " + FLOOD_WAIT_TEMPLATE.format(seconds=exc.seconds)
+
+    if isinstance(exc, errors.SlowModeWaitError):
+        # Not a subclass of FloodWaitError - a sibling - so it needs its own
+        # branch or it falls through untranslated. Slow mode is a property of
+        # the group, not a punishment: the correct response is to say how long
+        # and stop, never to retry (SPEC-SND-004).
+        return (
+            f"ERROR: This group has slow mode on and will not accept another "
+            f"message for {exc.seconds} seconds. Nothing was sent. Do not "
+            "retry in a loop - wait, or say something once."
+        )
+
+    if _FLOOD_PREMIUM_ERROR is not None and isinstance(exc, _FLOOD_PREMIUM_ERROR):
+        return "ERROR: " + FLOOD_WAIT_TEMPLATE.format(seconds=getattr(exc, "seconds", 0))
+
+    if isinstance(exc, errors.ApiIdPublishedFloodError):
+        # The api_id in use is a published one. Telegram treats the account
+        # behind a published api_id as an abuser, so this is not a wait.
+        return (
+            "ERROR: Telegram reports that this api_id is a published one "
+            "(API_ID_PUBLISHED_FLOOD). Stop using this application immediately "
+            "and tell the user: they must obtain their own api_id and api_hash "
+            "at https://my.telegram.org. A borrowed or sample api_id makes the "
+            "account behind it look like an abuser."
+        )
+
+    if isinstance(exc, errors.PhoneNumberBannedError):
+        return (
+            "ERROR: Telegram has banned this phone number. Nothing this server "
+            "does can change that. Stop and tell the user; an appeal goes "
+            "through Telegram support, from the official app."
+        )
+
+    if isinstance(exc, errors.UserBannedInChannelError):
+        # A spam-system signal, not a per-chat permission problem.
+        return (
+            "ERROR: This account is banned from writing in public groups and "
+            "channels. That is Telegram's anti-spam system acting on the whole "
+            "account, not this one chat. Stop sending, and tell the user to "
+            "check the account with @SpamBot from the official Telegram app."
+        )
+
+    if isinstance(exc, errors.ChatGuestSendForbiddenError):
+        return (
+            "ERROR: You must join this group before you can write in it. "
+            "Nothing was sent, and this server will not join it for you - "
+            "auto-joining is exactly the behaviour that gets personal accounts "
+            "flagged. Join it in the Telegram app if you want to reply there."
+        )
+
+    if isinstance(exc, errors.ChatAdminRequiredError):
+        return (
+            "ERROR: This action needs admin rights in that chat and the account "
+            "does not have them. Nothing was done, and there is nothing to retry."
+        )
+
+    if isinstance(exc, errors.ChannelPrivateError | errors.ChannelInvalidError):
+        return (
+            "ERROR: That channel is private, gone, or the account is not a "
+            "member of it. Nothing was requested. This server never joins a "
+            "channel to get access - ask the user to join it in the Telegram "
+            "app if they want it read."
+        )
+
+    if isinstance(exc, errors.TakeoutInitDelayError):
+        return (
+            f"ERROR: Telegram wants the data export confirmed from the official "
+            f"app before it will start, and is asking to wait {exc.seconds} "
+            "seconds. This project does not use the takeout API, so seeing this "
+            "means something unexpected requested one."
+        )
 
     if isinstance(exc, errors.PeerFloodError):
         return (
@@ -157,6 +472,20 @@ def describe_telegram_error(exc: BaseException) -> str | None:
         return (
             "ERROR: Your own account is deactivated or banned by Telegram. "
             "The MCP server cannot operate. Contact Telegram support."
+        )
+
+    if isinstance(exc, errors.AuthKeyDuplicatedError):
+        # Deliberately worded to stop a retry. By the time this arrives the
+        # login is already gone - Telegram's own documentation says the session
+        # "is already invalidated" - so an agent that reads a vague message and
+        # tries again is only wasting the user's time (SPEC-SEC-010, RISK-08).
+        return (
+            "ERROR: This session was invalidated because another connection "
+            "used the same authorization key (AUTH_KEY_DUPLICATED). The login "
+            "is already gone and retrying cannot bring it back. This normally "
+            "means a sync ran while the server was connected. Run `just "
+            "tg-auth` in a terminal to sign in again, and delete the stale "
+            "tg_session.sync.session clone."
         )
 
     if isinstance(exc, errors.AuthKeyUnregisteredError | errors.SessionRevokedError):

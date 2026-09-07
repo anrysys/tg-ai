@@ -178,15 +178,33 @@ def test_persona_table_is_separate_from_dialogs():
         assert column not in db._UPSERT_DIALOG_SQL
 
 
+#: Columns of `dialogs` that a sync owns and may overwrite on every run.
+#: Everything else on that row, and every column of `dialog_personas`, is
+#: written by a person and a sync must never touch it (SPEC-PSN-001).
+SYNC_OWNED_DIALOG_COLUMNS = {
+    "username",
+    "first_name",
+    "last_name",
+    "phone",
+    "is_contact",
+    "peer_type",
+}
+
+
 def test_the_dialog_upsert_still_touches_only_sync_columns():
     updated = db._UPSERT_DIALOG_SQL.split("DO UPDATE SET", 1)[1]
-    assert set(re.findall(r"(\w+)\s*=\s*EXCLUDED", updated)) == {
-        "username",
-        "first_name",
-        "last_name",
-        "phone",
-        "is_contact",
-    }
+    assert set(re.findall(r"(\w+)\s*=\s*EXCLUDED", updated)) == SYNC_OWNED_DIALOG_COLUMNS
+
+
+def test_the_dialog_upsert_can_never_reach_the_cursor_or_a_persona():
+    # The reason the assertion above is an equality rather than a subset: a
+    # column added to this statement without thought would be silently
+    # overwritten on every `just tg-sync`. The Sync Cursor has its own
+    # statement, and a Dialog Persona is the one thing here a resync cannot
+    # rebuild.
+    updated = db._UPSERT_DIALOG_SQL.split("DO UPDATE SET", 1)[1]
+    for forbidden in ("last_synced_message_id", "synced_at", "addressing", "tone", "metrics"):
+        assert forbidden not in updated
 
 
 def test_persona_table_cascades_from_dialogs():

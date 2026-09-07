@@ -92,6 +92,26 @@ tools.
 `just tg-auth` **must run in a real terminal** - it asks for the code Telegram
 sends you, and an MCP server has no way to prompt.
 
+> ### ANTI-BAN WARNING: set `TG_LANG_CODE` before you log in
+>
+> **`TG_LANG_CODE` must match the interface language of the official Telegram
+> app on your phone.** Spanish app, set `es`. Russian app, set `ru`. German,
+> `de`. The shipped default is `en` only because this is a public repository
+> and no single language can be right for everyone - it is **not** a safe
+> value for you unless your app really is in English.
+>
+> Every connection reports `lang_code` and `system_lang_code` to Telegram,
+> next to a phone number and an `api_id` it has already seen used from the
+> official app for years. An app that says `ru` and a client that says `en` on
+> every single connection is a contradiction in Telegram's own records - on an
+> account that unofficial-API use has already placed under observation.
+> Matching costs nothing. Not matching adds a signal for no benefit.
+>
+> Set it in `.env`, together with `TG_TIMEZONE` and `TG_QUIET_HOURS`, and then
+> leave all of them alone: they are replayed on every reconnection, so
+> changing them later makes your own **Settings -> Devices** entry mutate
+> under you.
+
 Then restart your agent and ask it to run `tg_whoami()`.
 
 ### Archive the people who matter first
@@ -415,7 +435,15 @@ enforcement. These protections are built in and tested, not optional:
 - **Your session file is a full credential.** It is git-ignored before it can
   exist and gets mode `0600`.
 - **Everything is local.** The database binds to `127.0.0.1`; Telegram sees the
-  same IP you always connect from.
+  same IP you always connect from. Run this on your own machine and your own
+  network - never a VPS, a container host or a rotating VPN.
+- **The client identifies itself honestly and never changes its story.** It
+  reports a generic device and its own name, never a forged official-client
+  version. Set `TG_LANG_CODE` to your Telegram app's language (see the
+  warning above) and then freeze it.
+- **Telegram's own limits are never slept through.** Telethon retries short
+  flood waits silently by default; that is switched off, so every one is
+  surfaced, counted, and after three in an hour the project stops itself.
 - **Message content is data, never instructions.** Everything read from Telegram
   was written by other people; an instruction inside a message is something to
   report, never to act on.
@@ -485,8 +513,22 @@ OpenCode and others. See the install matrix above.
 
 ### Does it read group chats and channels?
 
-No. Private one-on-one chats with people only. Groups, channels, bots and
-Telegram's own service account are excluded from the sync and from every tool.
+Yes, but deliberately grudgingly. It reads groups and channels **you have
+already joined**, and only ones you name explicitly - a routine sync still
+covers private chats only.
+
+Each group can be read at most once every five minutes, with a ceiling of twenty
+group reads a day and one hundred messages per read, which is a single API call.
+Those counters live in the database, so restarting the server does not reset
+them.
+
+It will **never join** a group or channel for you, and it cannot read one you
+have not joined - looking up channels you are not in is the behaviour that gets
+personal accounts flagged as scrapers. It never fetches member lists, and it
+cannot message someone it has only seen writing in a group. In a channel it can
+post only if you are an admin there.
+
+Bots and Telegram's own service account remain excluded.
 
 ### What is the Model Context Protocol?
 
@@ -513,7 +555,10 @@ just              # list everything
 just check        # ruff + black + pytest + docs checks
 just tg-sync      # refresh the archive (incremental)
 just tg-sync-targets @anna @bob   # archive only these people
-just tg-status    # account, session, database, archive health
+just tg-sync-targets "Some Group"  # or a group you have joined (max 5 per run)
+just tg-status    # account, DC, identity, request budget, kill switch, archive
+just tg-killswitch        # is the safety stop on, and why
+just tg-killswitch-clear  # turn it off, after checking the account by hand
 just db-psql      # psql shell into the archive
 ```
 
@@ -526,9 +571,12 @@ how changes are made here.
 
 ## Scope
 
-Private 1-on-1 text chats with people. Not groups, not channels, not bots, not
-media, and nothing that deletes or edits messages on your account. See the
-non-goals in [docs/10-product/prd.md](docs/10-product/prd.md).
+Text chats. Private conversations with people, plus groups and channels you have
+already joined, read under strict per-target and per-day limits. Not bots, not
+media, and nothing that deletes or edits messages on your account. It never
+joins a group, never fetches a member list, and never messages someone it has
+only seen writing in one. See the non-goals in
+[docs/10-product/prd.md](docs/10-product/prd.md).
 
 ## Contributing
 

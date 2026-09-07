@@ -3,7 +3,7 @@ id: DOC-PRD
 title: Product requirements
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-07
 related: [DOC-SRS, DOC-ROADMAP]
 ---
 
@@ -78,7 +78,9 @@ prepends. Governed by `SPEC-PSN-*` and
 
 Explicitly out of scope. Adding any of these requires a PRD change and an ADR.
 
-- **Groups and channels.** Private 1-on-1 chats only.
+- **Unbounded group and channel use.** Groups and channels are supported, but only ones the account is already a member of, only when named
+  explicitly, and under hard volume caps ([ADR-0009](../20-architecture/adr/0009-groups-and-channels.md)). Joining one, or reading one the user has not
+  joined, stays out of scope permanently.
 - **Media.** Only message text is archived and sent. No photos, files or voice.
 - **Deleting or editing messages.** The server never destroys anything on the
   account.

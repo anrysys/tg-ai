@@ -122,6 +122,14 @@ tg-serve:
 tg-status:
     @{{ python }} -c "import asyncio, server; print(asyncio.run(server.tg_whoami()))"
 
+# Report the Telegram safety kill switch (SPEC-LIM-003).
+tg-killswitch:
+    @{{ python }} scripts/killswitch.py
+
+# Clear the kill switch. Asks first, and tells you what to check before saying yes.
+tg-killswitch-clear:
+    @{{ python }} scripts/killswitch.py --clear
+
 # --- python --------------------------------------------------------------
 
 # Format the codebase.

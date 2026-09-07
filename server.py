@@ -31,7 +31,7 @@ import asyncpg
 from mcp.server.fastmcp import FastMCP
 from telethon import TelegramClient
 from telethon.tl.functions.contacts import AddContactRequest, ImportContactsRequest
-from telethon.tl.types import InputPhoneContact, User
+from telethon.tl.types import InputPhoneContact
 
 from tg_ai import db, persona
 from tg_ai.config import Config, ConfigError, load_config
@@ -48,20 +48,36 @@ from tg_ai.formatting import (
 )
 from tg_ai.safety import (
     CHUNK_DELAY_SECONDS,
+    GROUP_FETCH_LIMIT,
+    GROUP_READ_COOLDOWN_SECONDS,
+    GROUP_READ_SCOPE,
+    GROUP_READS_PER_DAY,
     MAX_CHUNK_CHARS,
+    MAX_TELEGRAM_TOOL_CALLS,
+    RPC_BUDGET_PER_DAY,
+    RPC_BUDGET_PER_HOUR,
     PersonaFieldError,
     ToolError,
     guarded_tool,
+    kill_switch_message,
     sanitise_persona_field,
     sleep_between_chunks,
     split_message,
 )
 from tg_ai.tg_client import (
+    PEER_TYPE_CHANNEL,
+    PEER_TYPE_GROUP,
+    PEER_TYPE_USER,
     PeerIndex,
+    RpcGuard,
+    SessionLock,
     build_client,
+    can_post,
     has_conversation,
+    is_member,
     normalise_target,
     peer_label,
+    peer_type,
     resolve_peer,
 )
 
@@ -77,6 +93,14 @@ mcp = FastMCP("tg-ai")
 _config: Config | None = None
 _client: TelegramClient | None = None
 _index: PeerIndex | None = None
+_lock: SessionLock | None = None
+_guard: RpcGuard | None = None
+
+#: Telegram-touching tool calls made by this process (SPEC-LIM-007). Per-process
+#: on purpose: this is the backstop against a runaway agent loop, which is a
+#: different failure from the rolling budgets in PostgreSQL. An LLM in a loop
+#: calls a tool as fast as the tool permits.
+_telegram_tool_calls = 0
 _pool: asyncpg.Pool | None = None
 
 
@@ -109,7 +133,19 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
     Raises:
         ToolError: The session is missing or no longer authorised.
     """
-    global _client, _index
+    global _client, _index, _guard, _telegram_tool_calls
+
+    _telegram_tool_calls += 1
+    if _telegram_tool_calls > MAX_TELEGRAM_TOOL_CALLS:
+        raise ToolError(
+            f"This server process has made {MAX_TELEGRAM_TOOL_CALLS} "
+            "Telegram-touching tool calls, which is the per-process ceiling. "
+            "That is almost always a loop rather than a plan. Nothing was "
+            "requested. Restart the MCP server deliberately if the work really "
+            "does need more, and consider tg_search_local_history, which reads "
+            "the archive and never touches Telegram."
+        )
+
     if _client is None:
         cfg = config()
         if not cfg.api_id or not cfg.api_hash:
@@ -123,10 +159,32 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
                 f"No Telegram session at {cfg.session_file}. Run `just tg-auth` "
                 "in a terminal - login needs an SMS code and cannot happen here."
             )
-        _client = build_client(cfg)
-        _index = PeerIndex(_client)
+        # The limiter's state lives in PostgreSQL, so the pool is a
+        # prerequisite for talking to Telegram at all. That ordering is the
+        # point: a budget that disappears when the database stops is not a
+        # budget (SPEC-LIM-002).
+        _guard = RpcGuard(
+            db.PostgresRpcLedger(await database()),
+            quiet_start=cfg.quiet_start,
+            quiet_end=cfg.quiet_end,
+            timezone=cfg.timezone,
+        )
+        _client = build_client(cfg, guard=_guard)
+        # The contact cache is persisted for the same reason the budget is:
+        # without it the server sends hash=0 on every launch and Telegram
+        # re-sends the whole contact list each time (SPEC-SND-006).
+        _index = PeerIndex(_client, store=db.PostgresContactStore(await database()))
 
     if not _client.is_connected():
+        # One connection per authorization key. The sync clone shares this
+        # key, so connecting while a sync runs is what produces
+        # AUTH_KEY_DUPLICATED - which invalidates the login rather than
+        # merely failing the call (SPEC-SEC-010, ADR-0010). Held for the life
+        # of the process; the kernel releases it if we die.
+        global _lock
+        if _lock is None:
+            _lock = SessionLock(config().session_lock_file, "the MCP server")
+        _lock.acquire()
         await _client.connect()
 
     if not await _client.is_user_authorized():
@@ -151,6 +209,58 @@ async def database() -> asyncpg.Pool:
 # --------------------------------------------------------------------------
 # Dialog Persona helpers
 # --------------------------------------------------------------------------
+
+
+#: Peer Types the reading tools accept. Passing this to resolve_peer is also
+#: what removes its cold-resolution path: a caller that admits a Group or
+#: Channel can never trigger a ResolveUsername (SPEC-SND-006).
+ANY_PEER = (PEER_TYPE_USER, PEER_TYPE_GROUP, PEER_TYPE_CHANNEL)
+
+
+async def check_group_read_budget(peer_id: int, label: str) -> None:
+    """Enforce the per-target cooldown and the daily cap (SPEC-RCV-003).
+
+    Both live in PostgreSQL rather than in memory. An MCP stdio server is
+    respawned every time the user reopens their editor, so an in-memory
+    cooldown is cleared constantly - and the caller this protects against is an
+    agent in a loop, which is exactly what a restart does not fix.
+
+    Raises:
+        ToolError: The target was read too recently, or the day's group reads
+            are used up. Nothing is requested from Telegram in either case.
+    """
+    ledger = db.PostgresRpcLedger(await database())
+
+    last_read = await ledger.last_call_for_key(GROUP_READ_SCOPE, str(peer_id))
+    if last_read is not None:
+        waited = (datetime.now(UTC) - last_read).total_seconds()
+        if waited < GROUP_READ_COOLDOWN_SECONDS:
+            remaining = int(GROUP_READ_COOLDOWN_SECONDS - waited)
+            raise ToolError(
+                f"{label} was read {int(waited)} seconds ago. Groups and "
+                f"channels have a {GROUP_READ_COOLDOWN_SECONDS}-second "
+                f"cooldown; {remaining} seconds remain. Nothing was requested "
+                "from Telegram. Do not poll - re-reading a channel every few "
+                "seconds is superhuman and is what the cooldown exists to "
+                "prevent. Use tg_search_local_history for what is already "
+                "archived."
+            )
+
+    used = await ledger.count_calls(GROUP_READ_SCOPE, 24 * 3600)
+    if used >= GROUP_READS_PER_DAY:
+        raise ToolError(
+            f"The daily group and channel read budget is used up "
+            f"({used}/{GROUP_READS_PER_DAY} in the last 24 hours). It refills "
+            "gradually as the oldest reads age out. Nothing was requested."
+        )
+
+
+async def record_group_read(peer_id: int) -> None:
+    """Log a completed group read against the cooldown and the daily cap."""
+    try:
+        await db.PostgresRpcLedger(await database()).record_call(GROUP_READ_SCOPE, str(peer_id))
+    except Exception as exc:  # noqa: BLE001 - the read already happened
+        log.warning("could not record group read for %s: %s", peer_id, exc)
 
 
 async def archived_dialog(pool: asyncpg.Pool, target: str) -> db.DialogRef:
@@ -180,6 +290,30 @@ async def archived_dialog(pool: asyncpg.Pool, target: str) -> db.DialogRef:
         f"covered yet. Run `just tg-sync-targets {target}` and retry, or check "
         "the spelling. Use tg_list_dialog_personas() to see what is archived."
     )
+
+
+async def persona_dialog(pool: asyncpg.Pool, target: str) -> db.DialogRef:
+    """Resolve a Target to an archived **person** for the Persona tools.
+
+    Raises:
+        ToolError: The target is a Group or Channel (`SPEC-PSN-009`). A Dialog
+            Persona models how one person writes to one other person. In a
+            group many people write, and in a channel the account usually
+            writes nothing at all, so measuring either produces meaningless
+            numbers - and worse, it would let other people's writing shape the
+            account owner's own recorded style.
+    """
+    dialog = await archived_dialog(pool, target)
+    kind = await db.get_peer_type(pool, dialog.chat_id)
+    if kind is not None and kind != PEER_TYPE_USER:
+        raise ToolError(
+            f"{dialog.label} is a {kind}, and a Dialog Persona describes how "
+            "the account writes to one person. Several people write in a "
+            f"{kind}, so there is no single style to record and measuring one "
+            "would mix other people's writing into the user's own. Personas "
+            "are for private chats only."
+        )
+    return dialog
 
 
 async def describe_persona(pool: asyncpg.Pool, dialog: db.DialogRef) -> str:
@@ -277,6 +411,13 @@ async def tg_send_message(target: str, message: str) -> str:
     accounts for it. Long text is split at sentence boundaries into chunks
     under Telegram's 4096-character limit and sent with a pause between them.
 
+    Groups and channels have extra rules. You may write in a group you are
+    currently a member of. You may write in a channel only if you have posting
+    rights there; a plain subscriber cannot, and this is checked without asking
+    Telegram. A message that would need splitting is refused outright for a
+    group or channel - several messages in a row is a long reply in a DM and
+    flooding in a group - so shorten it instead.
+
     Before composing a reply in an ongoing conversation, call
     tg_get_dialog_persona(target) so the draft matches how the user actually
     writes to that person. A message in a generic register is obvious to
@@ -284,8 +425,10 @@ async def tg_send_message(target: str, message: str) -> str:
 
     Args:
         target: Recipient - "@username", a phone number in international
-            format, a numeric user id, or "me" for Saved Messages.
-        message: The text to send. Any length; it will be split if needed.
+            format, a numeric user id, "me" for Saved Messages, or the title of
+            a group or channel you are in.
+        message: The text to send. Any length for a person; a group or channel
+            message must fit in one chunk.
 
     Returns:
         A confirmation naming the recipient and chunk count, or a WARNING
@@ -295,53 +438,111 @@ async def tg_send_message(target: str, message: str) -> str:
     if not body:
         return "ERROR: message is empty - nothing was sent."
 
-    client, index = await telegram()
-    user, known_locally = await resolve_peer(client, index, target)
-    label = peer_label(user)
-    me = await client.get_me()
-
-    # --- Send guard (SPEC-SND-001) ----------------------------------------
-    # Saved Messages is always safe: the account is writing to itself.
-    # Conditions are ordered cheapest-first and short-circuit, so a peer we
-    # already know costs no extra API call at all.
-    is_stranger = (
-        user.id != me.id
-        and not known_locally
-        and not await has_conversation(client, user)
-        and user.id not in await index.contact_ids()
-    )
-    if is_stranger:
+    # Checked before anything connects, so a Peer harvested from a group costs
+    # no API call to refuse (SPEC-SND-008). A numeric id is the only shape this
+    # can arrive as: those ids come from `messages.sender_id`, and Telegram
+    # delivered them as `min` constructors whose access_hash cannot address
+    # them anyway.
+    key = normalise_target(target)
+    if key.isdigit() and await db.is_group_only_sender(await database(), int(key)):
         return (
-            f"WARNING: Nothing was sent. There is no prior conversation with "
-            f"{label} and they are not in your contacts. Messaging a stranger "
-            "from a personal account triggers Telegram's anti-spam system "
-            "(PeerFloodError) and can get the account limited or banned.\n\n"
-            "To proceed deliberately, call:\n"
-            f'  tg_add_contact(phone_or_username="{target}", first_name="...")\n'
-            "and then retry this send. If you cannot add them, ask the user "
-            "how they want to reach this person."
+            f"ERROR: {target} is someone this account has only ever seen "
+            "writing inside a group or channel. Nothing was sent, and nothing "
+            "was requested from Telegram.\n\n"
+            "Ids seen in a group are stored for attribution only. Telegram "
+            "hands them over in a form that deliberately cannot be used to "
+            "message anyone, and turning group members into contacts one at a "
+            "time is the same scraping that gets personal accounts banned.\n\n"
+            "If the user genuinely knows this person, ask them for the "
+            "@username or phone number and start a conversation the ordinary "
+            "way."
         )
 
+    client, index = await telegram()
+    peer, known_locally = await resolve_peer(client, index, target, allow=ANY_PEER)
+    kind = peer_type(peer)
+    label = peer_label(peer)
+    me = await client.get_me()
+
     chunks = split_message(body, MAX_CHUNK_CHARS)
+
+    if kind != PEER_TYPE_USER:
+        # --- Group and channel guard (SPEC-SND-001) -----------------------
+        # Both checks read the cached entity from the Peer Index, so neither
+        # costs an API call - and a refusal therefore costs nothing at all.
+        if not is_member(peer):
+            return (
+                f"ERROR: This account is not a member of {label}. Nothing was "
+                "sent. This server will not join a group or channel to deliver "
+                "a message."
+            )
+        if not can_post(peer):
+            reason = (
+                "you are a subscriber there, not someone with posting rights"
+                if kind == PEER_TYPE_CHANNEL
+                else "sending is restricted to admins there"
+            )
+            return (
+                f"ERROR: This account cannot post in {label} - {reason}. "
+                "Nothing was sent and nothing was requested from Telegram."
+            )
+        if len(chunks) > 1:
+            # In a DM this is a long reply. In a group it is N consecutive
+            # messages, which is flooding, and in a slow-mode group the second
+            # chunk fails anyway. Refusing is better than getting there.
+            return (
+                f"ERROR: That message is {len(body)} characters and would be "
+                f"sent to {label} as {len(chunks)} separate messages. Several "
+                "messages in a row is flooding in a group, and a slow-mode "
+                "group would reject them. Nothing was sent - shorten it to "
+                f"under {MAX_CHUNK_CHARS} characters."
+            )
+    else:
+        # --- Send guard (SPEC-SND-001) ------------------------------------
+        # Saved Messages is always safe: the account is writing to itself.
+        # Conditions are ordered cheapest-first and short-circuit, so a peer we
+        # already know costs no extra API call at all.
+        is_stranger = (
+            peer.id != me.id
+            and not known_locally
+            and not await has_conversation(client, peer)
+            and peer.id not in await index.contact_ids()
+        )
+        if is_stranger:
+            return (
+                f"WARNING: Nothing was sent. There is no prior conversation with "
+                f"{label} and they are not in your contacts. Messaging a stranger "
+                "from a personal account triggers Telegram's anti-spam system "
+                "(PeerFloodError) and can get the account limited or banned.\n\n"
+                "To proceed deliberately, call:\n"
+                f'  tg_add_contact(phone_or_username="{target}", first_name="...")\n'
+                "and then retry this send. If you cannot add them, ask the user "
+                "how they want to reach this person."
+            )
+
     sent = 0
     try:
         for position, chunk in enumerate(chunks):
             if position:
                 # Pacing matters more than latency: several messages per
-                # second to one peer is a spam signal (SPEC-SND-003).
+                # second to one peer is a spam signal (SPEC-SND-003). Only
+                # reachable for a person - a group send is one chunk or none.
                 await sleep_between_chunks()
-            await client.send_message(user, chunk)
+            await client.send_message(peer, chunk)
             sent += 1
     except Exception:
         if sent:
             log.warning("partial send to %s: %d/%d chunks", label, sent, len(chunks))
         raise
 
+    if kind != PEER_TYPE_USER:
+        return f"Sent to {label} ({kind}, {len(body)} characters)."
+
     # Only reached once every chunk is delivered. The hint is computed here,
     # after the send, and swallows its own failures - see persona_hint. The
     # Send Guard above is untouched by any of this: nothing in the Persona
     # feature can refuse a send or resolve a target a second way (ADR-0005).
-    hint = await persona_hint(user.id, label)
+    hint = await persona_hint(peer.id, label)
 
     if len(chunks) == 1:
         return f"Sent to {label} ({len(body)} characters).{hint}"
@@ -354,36 +555,73 @@ async def tg_send_message(target: str, message: str) -> str:
 @mcp.tool()
 @guarded_tool
 async def tg_get_recent_messages(target: str, limit: int = 10) -> str:
-    """Read the latest messages exchanged with one person, live from Telegram.
+    """Read the latest messages in one chat, live from Telegram.
 
-    Use this to check what someone replied. It reads the live account, not the
-    local archive, so it sees messages that arrived seconds ago.
+    Works for a person, a group or a channel you are a member of. It reads the
+    live account, not the local archive, so it sees messages that arrived
+    seconds ago.
+
+    GROUPS AND CHANNELS ARE RATE-LIMITED, DELIBERATELY. Each one can be read at
+    most once every 300 seconds, and at most 20 group or channel reads are
+    allowed per day across every process. Both limits are stored in the
+    database and survive a restart of this server, so retrying or restarting
+    will not clear them. Do not poll: if you need to watch a channel, tell the
+    user it cannot be watched continuously. For anything already archived, use
+    tg_search_local_history, which never touches Telegram.
+
+    A group or channel you have not joined cannot be read at all, and this
+    server will not join one.
 
     Args:
-        target: "@username", phone number, numeric user id, or "me".
-        limit: How many recent messages to fetch (1-100).
+        target: "@username", phone number, numeric id, "me", or the title of a
+            group or channel you are in.
+        limit: How many recent messages to fetch (1-100; a group or channel is
+            capped at 100, which is one API call).
 
     Returns:
-        One line per message, oldest first, each tagged [me] or [them].
+        One line per message, oldest first, each tagged [me] or [them]. For a
+        person this is preceded by their Dialog Persona; groups and channels
+        have none, because a persona describes how one person writes to one
+        other person.
     """
     limit = max(1, min(int(limit), 100))
     client, index = await telegram()
-    user, _ = await resolve_peer(client, index, target)
+    peer, _ = await resolve_peer(client, index, target, allow=ANY_PEER)
+    kind = peer_type(peer)
+    label = peer_label(peer)
 
-    messages = await client.get_messages(user, limit=limit)
+    if kind != PEER_TYPE_USER:
+        # Checked before the request, so a refusal costs nothing.
+        await check_group_read_budget(peer.id, label)
+        # One API call, never two. Telegram counts requests, not messages.
+        limit = min(limit, GROUP_FETCH_LIMIT)
+
+    messages = await client.get_messages(peer, limit=limit)
+    if kind != PEER_TYPE_USER:
+        await record_group_read(peer.id)
+
     # Telethon returns newest-first; conversations read better oldest-first.
     ordered = list(reversed(messages))
-    header = f"Last {len(ordered)} message(s) with {peer_label(user)}:"
+    header = f"Last {len(ordered)} message(s) with {label}:"
     conversation = render_conversation(ordered, header=header)
+
+    if kind != PEER_TYPE_USER:
+        # No Persona for a Group or Channel (SPEC-PSN-009). A persona models
+        # how the account writes to one person; in a group many people write,
+        # and in a channel the account usually writes nothing at all, so the
+        # measurement would be meaningless and could mix other people's style
+        # into the account owner's own.
+        return (
+            f"[{kind}] Senders below are identified for attribution only. "
+            "Those ids are not people this server can message.\n\n"
+            f"{conversation}"
+        )
 
     # The Persona goes above the messages, not below: this is the tool an agent
     # calls immediately before drafting, so it is the one place the style
     # constraint is guaranteed to be in context at the moment it is needed
-    # (SPEC-PSN-007). The chat id is the resolved user's id - for a 1-on-1
-    # dialog they are the same value - rather than a second Dialog Lookup,
-    # because two resolutions in one tool can disagree and describe the wrong
-    # person. persona_header never raises.
-    return f"{await persona_header_for(user.id, peer_label(user))}\n\n{conversation}"
+    # (SPEC-PSN-007). persona_header never raises.
+    return f"{await persona_header_for(peer.id, label)}\n\n{conversation}"
 
 
 @mcp.tool()
@@ -392,7 +630,13 @@ async def tg_get_unread_dialogs(limit: int = 5) -> str:
     """List the people who have sent unread messages.
 
     Answers "do I have new messages?" without opening Telegram. Only 1-on-1
-    chats with people are considered; groups, channels and bots are ignored.
+    chats with people are reported. Groups and channels are deliberately left
+    out: an account in dozens of channels always has unread items there, and
+    listing them buries the question the user actually asked.
+
+    Reads a dialog snapshot shared with the peer index rather than fetching its
+    own, so asking this costs no extra request most of the time. The snapshot
+    can therefore be up to ten minutes old.
 
     Args:
         limit: Maximum number of dialogs to report (1-50).
@@ -402,27 +646,31 @@ async def tg_get_unread_dialogs(limit: int = 5) -> str:
         message. Reading this does not mark anything as read.
     """
     limit = max(1, min(int(limit), 50))
-    client, _ = await telegram()
+    _, index = await telegram()
     cfg = config()
 
     entries: list[dict] = []
-    async for dialog in client.iter_dialogs():
+    # Iterating the shared snapshot examines a bounded number of dialogs, which
+    # is the point: the previous version broke only once it had collected
+    # `limit` UNREAD dialogs, so an account with nothing unread walked the
+    # entire dialog list on every call (SPEC-RCV-005).
+    for record in await index.dialogs():
         if len(entries) >= limit:
             break
-        entity = dialog.entity
-        if not isinstance(entity, User) or entity.deleted:
+        entity = record.entity
+        if record.kind != PEER_TYPE_USER or entity.deleted:
             continue
         if entity.bot and not cfg.sync_include_bots:
             continue
-        if dialog.unread_count <= 0:
+        if record.unread_count <= 0:
             continue
         entries.append(
             {
                 "username": entity.username,
                 "name": peer_label(entity),
-                "unread": dialog.unread_count,
-                "date": dialog.date,
-                "text": dialog.message.message if dialog.message else None,
+                "unread": record.unread_count,
+                "date": record.date,
+                "text": record.preview,
             }
         )
 
@@ -563,7 +811,7 @@ async def tg_get_dialog_persona(target: str, samples: int = 12) -> str:
     """
     samples = max(0, min(int(samples), 50))
     pool = await database()
-    dialog = await archived_dialog(pool, target)
+    dialog = await persona_dialog(pool, target)
 
     header = (
         f"Dialog: {dialog.display_name} ({dialog.label}) - "
@@ -632,7 +880,7 @@ async def tg_set_dialog_persona(
         the ambiguous target. Nothing is stored when an ERROR is returned.
     """
     pool = await database()
-    dialog = await archived_dialog(pool, target)
+    dialog = await persona_dialog(pool, target)
 
     try:
         fields = {
@@ -745,6 +993,10 @@ async def tg_whoami() -> str:
         client, _ = await telegram()
         me = await client.get_me()
         lines.append(f"Account:  {peer_label(me)} (id {me.id})")
+        # The data centre the session lives on. A silent relocation of the
+        # account is otherwise invisible, and it is exactly the kind of change
+        # that matters on an account under observation (SPEC-SEC-006).
+        lines.append(f"DC:       {client.session.dc_id}")
         if cfg.expected_username and (me.username or "").lower() != cfg.expected_username.lower():
             lines.append(
                 f"WARNING:  expected @{cfg.expected_username} - this is a different account."
@@ -753,11 +1005,40 @@ async def tg_whoami() -> str:
         lines.append(f"Account:  UNAVAILABLE - {exc}")
 
     lines.append(f"Session:  {cfg.session_file}")
+    lines.append(
+        f"Identity: {cfg.device_model} / {cfg.system_version} / {cfg.app_version} / "
+        f"lang {cfg.lang_code}"
+    )
+    lines.append(f"Window:   awake {cfg.quiet_end:%H:%M}-{cfg.quiet_start:%H:%M} {cfg.timezone}")
 
     try:
         pool = await database()
         stats = await db.archive_stats(pool)
         lines.append(f"Database: reachable ({cfg.database_url.rsplit('@', 1)[-1]})")
+
+        # Read straight from the archive rather than through the client, so an
+        # exhausted budget or a tripped kill switch is still legible when
+        # Telegram itself is being refused (SPEC-LIM-002, SPEC-LIM-003).
+        ledger = db.PostgresRpcLedger(pool)
+        hourly, daily = await ledger.rpc_counts()
+        lines.append(
+            f"Budget:   {max(0, RPC_BUDGET_PER_HOUR - hourly)}/{RPC_BUDGET_PER_HOUR} requests "
+            f"left this hour, {max(0, RPC_BUDGET_PER_DAY - daily)}/{RPC_BUDGET_PER_DAY} today"
+        )
+        switch = await ledger.active_kill_switch()
+        if switch is None:
+            lines.append("Safety:   kill switch off")
+        else:
+            tripped_at, reason, expires_at = switch
+            message = kill_switch_message(
+                tripped_at=tripped_at,
+                reason=reason,
+                expires_at=expires_at,
+                now=datetime.now(UTC),
+            )
+            lines.append(
+                f"Safety:   {message}" if message else "Safety:   kill switch off (lapsed)"
+            )
         lines.append(
             f"Archive:  {stats.get('messages', 0)} messages across "
             f"{stats.get('dialogs', 0)} dialogs"

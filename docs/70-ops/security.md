@@ -3,7 +3,7 @@ id: DOC-SECURITY
 title: Security
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-07
 related: [DOC-SRS, ADR-0004, ADR-0005, DOC-RUNBOOK-INDEX]
 ---
 
@@ -62,14 +62,27 @@ The archive is a full plaintext copy of every private conversation.
 acceptable **only** because the port is unreachable off-host; exposing it
 without changing them would be a serious defect.
 
-### RISK-05 - Connecting from an unfamiliar IP
+### RISK-05 - Connecting from an unfamiliar or datacentre IP
 
 Telegram treats a sudden connection from a new country or a datacentre range as
-a compromise signal, especially combined with scripted behaviour.
+a compromise signal, especially combined with scripted behaviour. Where the
+MTProto packets come from is the strongest userbot signal there is, and it
+outweighs every pacing constant in this project: a perfectly paced client on a
+rented server is banned, a sloppy one on a home laptop usually is not.
 
-**Mitigation.** Local-only deployment. Do not run this on a VPS, do not route it
-through a VPN the account has never used, and do not run the sync from a
-different machine than the one the user's Telegram normally runs on.
+Two IPs on one authorization key is also the documented trigger for
+`AUTH_KEY_DUPLICATED` - see [RISK-08](#risk-08---the-session-is-revoked-by-a-duplicated-key).
+
+**Mitigation.** Local-only deployment, stated as a requirement rather than a
+recommendation in `SPEC-SEC-006`: the user's own machine, the user's own
+network, never a VPS or container platform, never a shared or rotating VPN, and
+`server.py` and `sync_db.py` always over the same path. There is deliberately no
+flag that relaxes it. `tg_whoami` reports `client.session.dc_id`, so a silent
+relocation of the account becomes visible immediately.
+
+This one binds the operator, not the code. No test can prove where a process is
+running; the controls are the requirement, the absence of an override, and the
+`dc_id` readout.
 
 ### RISK-06 - Prompt injection through message content
 
@@ -119,6 +132,93 @@ Note that the verbatim samples returned by `tg_get_dialog_persona` are message
 text by design - measurements alone cannot convey a voice. They are
 outgoing-only, but the account's own messages can still quote or forward an
 attacker's words, so they carry the same data-not-instructions fence.
+
+### RISK-08 - The session is revoked by a duplicated key
+
+The Session Clone that `sync_db.py` uses (ADR-0004) carries the **same**
+authorization key as the primary Session. Two live MTProto connections on one
+key past Telegram's limit produce `AUTH_KEY_DUPLICATED`, and its documentation
+is explicit that "the session is already invalidated" when the error arrives.
+
+There is no warning that comes early enough to back off. The account owner loses
+the login outright and recovers only with a fresh SMS code. Before this was
+guarded, nothing stopped `just tg-sync` running while an agent session held the
+server open - and `--in-place` being described as "the unsafe mode" implied the
+clone was the safe one, which is backwards.
+
+**Mitigation.** An exclusive `flock` on `<session_name>.lock`, taken by whichever
+process is about to connect and keyed to the primary Session name so the server
+and the sync contend for the same file (`SPEC-SEC-010`,
+[ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md)).
+The loser exits rather than waiting. `sync_db.py` takes the lock before cloning,
+so a locked-out run also cannot produce a torn copy of a live SQLite file.
+`AuthKeyDuplicatedError` is translated to say plainly that the session is
+already dead, because an untranslated error invites a retry and there is nothing
+left to retry.
+
+**If it happens.** Follow
+[the revoked-session runbook](runbooks/session-lost-or-revoked.md). Re-authenticate
+with `just tg-auth`, and delete the stale clone - it holds a key that is now
+invalid but was, until that moment, a full credential.
+
+### RISK-09 - Flood waits accumulating silently
+
+Telethon's `flood_sleep_threshold` defaults to 60 seconds, and the library
+*sleeps on* - that is, silently retries - every flood or slow-mode wait at or
+below it. Scraping-induced waits are typically 5 to 30 seconds, so the default
+swallows almost all of them.
+
+This was live in this project for its whole history before ADR-0009. Three
+things followed from it. `AGENTS.md` forbids retrying a `FloodWaitError` because
+retrying extends the limit, and the library was doing exactly that on every run.
+`sync_db.py`'s `except FloodWaitError` handler could almost never fire, so the
+code that looked like flood handling was close to dead. And the account could be
+flood-limited many times in one run with every log line clean - while flood
+*frequency*, not the length of any single wait, is what feeds Telegram's
+server-side risk score.
+
+The failure mode is that everything looks fine right up until the account is
+restricted.
+
+**Mitigation.** `flood_sleep_threshold=0` (`SPEC-SEC-008`), so every wait
+surfaces as an exception instead of a nap. Each one is recorded in
+`api_flood_log` with its method and target, and three inside a rolling hour trip
+the kill switch (`SPEC-LIM-003`). `just tg-status` shows the switch and the
+remaining budget, so the accumulation is visible before it becomes a
+restriction rather than after.
+
+### RISK-10 - The archive becomes a member database nobody asked for
+
+Reading a Group or Channel means storing other people's ids. `messages` already
+has a `sender_id` column, and with group support it fills up with people the
+account owner has never spoken to - potentially thousands of them, from a
+handful of reads.
+
+Two things could turn that into a real problem. The obvious one: someone treats
+`sender_id` as a foreign key to a person and starts resolving those ids, which
+is `channels.getParticipants` reimplemented one message at a time. The quieter
+one: Telethon's own entity cache accumulates the same strangers' access hashes
+inside the session file, and `clone_session()` copies that file on every sync
+run - so a project that only ever *reads* text would still be accumulating an
+addressable index of people who never consented to being in it.
+
+**Mitigation.** Structural, in four places:
+
+1. Ids seen in a Group are `min` constructors and cannot address anyone
+   anyway; the schema says so in a `COMMENT ON COLUMN`, because the next
+   person to read it would otherwise assume it is a foreign key.
+2. `tg_send_message` refuses a Peer whose only provenance is a Group message,
+   before making any API call (`SPEC-SND-008`).
+3. The whole harvesting family - `inputPeerUserFromMessage`,
+   `contacts.search`, `messages.getCommonChats`,
+   `messages.getMessageReactionsList` and the rest - is absent from the source
+   and a test fails if any name appears (`SPEC-LIM-006`).
+4. `entity_cache_limit=500` caps what the session file accumulates
+   (`SPEC-SEC-008`), down from Telethon's default of 5000.
+
+**If it happens.** The rows are text and ids, not access hashes, so the archive
+alone cannot address anyone. Deleting a group's history removes them:
+`DELETE FROM dialogs WHERE chat_id = <id>` cascades to `messages`.
 
 ## Rules
 

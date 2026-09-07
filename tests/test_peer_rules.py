@@ -4,15 +4,20 @@ Proves SPEC-SYNC-001 and SPEC-SYNC-006.
 """
 
 import pytest
-from telethon.tl.types import Channel, User
+from telethon.tl.types import Channel, Chat, ChatAdminRights, ChatBannedRights, User
 
 from sync_db import select_by_targets
 from tg_ai.tg_client import (
+    can_post,
+    contacts_hash,
     display_name,
     is_archivable,
+    is_member,
     matches_target,
     normalise_target,
     peer_label,
+    peer_match_keys,
+    peer_type,
 )
 
 
@@ -49,8 +54,8 @@ def test_the_telegram_service_account_is_excluded():
     assert not is_archivable(make_user(id=777000), include_bots=True)
 
 
-def test_channels_and_groups_are_excluded():
-    channel = Channel(id=5, title="News", photo=None, date=None)
+def test_channels_and_groups_are_excluded_from_a_default_sync():
+    channel = Channel(id=5, title="News", photo=None, date=None, broadcast=True)
     assert not is_archivable(channel, include_bots=True)
 
 
@@ -157,3 +162,205 @@ def test_select_by_targets_with_no_match_selects_nothing():
     selected, unmatched = select_by_targets([make_user(id=1, username="ann")], ["zzz"])
     assert selected == []
     assert unmatched == ["zzz"]
+
+
+# --- Peer Types (SPEC-SYNC-001, SPEC-SYNC-007) ----------------------------
+
+
+def make_chat(**kwargs) -> Chat:
+    defaults = {
+        "id": 200,
+        "title": "Team",
+        "photo": None,
+        "participants_count": 4,
+        "date": None,
+        "version": 1,
+    }
+    return Chat(**{**defaults, **kwargs})
+
+
+def make_channel(**kwargs) -> Channel:
+    defaults = {"id": 300, "title": "News", "photo": None, "date": None}
+    return Channel(**{**defaults, **kwargs})
+
+
+def admin_rights(**kwargs) -> ChatAdminRights:
+    defaults = dict.fromkeys(
+        (
+            "change_info",
+            "post_messages",
+            "edit_messages",
+            "delete_messages",
+            "ban_users",
+            "invite_users",
+            "pin_messages",
+            "add_admins",
+        ),
+        False,
+    )
+    return ChatAdminRights(**{**defaults, **kwargs})
+
+
+@pytest.mark.parametrize(
+    ("entity", "expected"),
+    [
+        (make_user(), "user"),
+        (make_chat(), "group"),
+        (make_channel(megagroup=True), "group"),
+        (make_channel(broadcast=True), "channel"),
+        # A gigagroup carries megagroup=True, but ordinary members cannot write
+        # in one, and writability is the distinction that matters.
+        (make_channel(megagroup=True, gigagroup=True), "channel"),
+    ],
+)
+def test_peer_types_are_classified_by_what_you_can_do_in_them(entity, expected):
+    assert peer_type(entity) == expected
+
+
+def test_an_unknown_entity_is_not_a_peer_at_all():
+    assert peer_type(object()) is None
+
+
+def test_a_full_sync_still_archives_people_only():
+    # SPEC-SYNC-001: groups and channels are opt-in through --targets. A full
+    # run must not quietly start pulling them, or every routine sync becomes a
+    # large read against monitored endpoints.
+    for entity in (make_chat(), make_channel(megagroup=True), make_channel(broadcast=True)):
+        assert not is_archivable(entity, include_bots=True)
+
+
+def test_groups_are_archivable_only_when_explicitly_included():
+    assert is_archivable(make_chat(), include_bots=False, include_groups=True)
+    assert is_archivable(make_channel(broadcast=True), include_bots=False, include_groups=True)
+
+
+def test_a_group_the_account_has_left_is_not_archivable():
+    left = make_channel(megagroup=True, left=True)
+    assert not is_archivable(left, include_bots=True, include_groups=True)
+    assert not is_member(left)
+
+
+def test_a_migrated_chat_is_not_a_live_group():
+    # Its history moved to a Channel; writing to the husk does nothing.
+    assert not is_member(make_chat(migrated_to=object()))
+
+
+# --- Who may be written to (SPEC-SND-001) ---------------------------------
+
+
+def test_a_channel_subscriber_may_not_post():
+    assert not can_post(make_channel(broadcast=True))
+
+
+def test_a_channel_admin_with_post_rights_may_post():
+    channel = make_channel(broadcast=True, admin_rights=admin_rights(post_messages=True))
+    assert can_post(channel)
+
+
+def test_a_channel_admin_without_post_rights_may_not_post():
+    # Being an admin is not the same as being allowed to publish.
+    channel = make_channel(broadcast=True, admin_rights=admin_rights(change_info=True))
+    assert not can_post(channel)
+
+
+def test_an_ordinary_group_member_may_post():
+    assert can_post(make_chat())
+    assert can_post(make_channel(megagroup=True))
+
+
+def test_a_group_that_bans_sending_is_writable_only_by_an_admin():
+    muted = make_channel(
+        megagroup=True,
+        default_banned_rights=ChatBannedRights(until_date=None, send_messages=True),
+    )
+    assert not can_post(muted)
+
+    moderator = make_channel(
+        megagroup=True,
+        default_banned_rights=ChatBannedRights(until_date=None, send_messages=True),
+        admin_rights=admin_rights(pin_messages=True),
+    )
+    assert can_post(moderator)
+
+
+def test_a_group_you_have_left_may_not_be_posted_to():
+    assert not can_post(make_channel(megagroup=True, left=True))
+
+
+# --- The contacts.getContacts hash (SPEC-SND-006) -------------------------
+
+
+def test_an_empty_contact_set_hashes_to_the_documented_zero():
+    assert contacts_hash(0, set()) == 0
+    assert contacts_hash(372, set()) == 0
+
+
+@pytest.mark.parametrize("size", [1, 2, 17, 500])
+def test_the_hash_always_fits_a_signed_long(size):
+    # Regression: contacts.getContacts declares `hash` as a signed 64-bit
+    # long, and Telethon packs it with struct '<q'. Returning the raw unsigned
+    # accumulator raises struct.error for roughly half of all inputs - which is
+    # exactly what happened the first time this ran against a real account.
+    ids = {i * 7919 + 1 for i in range(size)}
+    value = contacts_hash(size, ids)
+    assert -(2**63) <= value < 2**63
+
+
+def test_the_hash_depends_on_saved_count_not_on_the_number_of_ids():
+    # Regression: the documented algorithm folds in the previous response's
+    # saved_count, which on a real account differs from the number of users
+    # returned - 372 against 502 on the account this was built for. Using the
+    # id count produces a hash that simply never matches, so the caching does
+    # nothing and there is no error to notice.
+    ids = {10, 20, 30}
+    assert contacts_hash(372, ids) != contacts_hash(len(ids), ids)
+
+
+def test_the_hash_does_not_depend_on_iteration_order():
+    assert contacts_hash(3, {30, 10, 20}) == contacts_hash(3, [10, 20, 30])
+    assert contacts_hash(3, [30, 20, 10]) == contacts_hash(3, [10, 20, 30])
+
+
+def test_a_changed_contact_list_changes_the_hash():
+    assert contacts_hash(3, {1, 2, 3}) != contacts_hash(3, {1, 2, 4})
+
+
+# --- Targets and labels for the widened Peer model ------------------------
+
+
+def test_a_group_is_matched_by_its_title():
+    group = make_chat(title="Team Chat")
+    assert matches_target(group, "Team Chat")
+    assert matches_target(group, "team  chat")
+    assert not matches_target(group, "Team")
+
+
+def test_a_channel_is_matched_by_title_username_or_id():
+    channel = make_channel(id=777, title="Remote All", username="remoteall", megagroup=True)
+    assert matches_target(channel, "Remote All")
+    assert matches_target(channel, "@remoteall")
+    assert matches_target(channel, "777")
+
+
+def test_matching_a_group_does_not_read_user_only_fields():
+    # Regression: peer_match_keys read `.phone` and `.first_name` directly, so
+    # naming any group in --targets raised AttributeError. The three Peer Types
+    # genuinely do not share a shape.
+    for peer in (make_chat(), make_channel(broadcast=True), make_channel(megagroup=True)):
+        assert peer_match_keys(peer)
+
+
+def test_a_group_gets_a_readable_label():
+    assert peer_label(make_chat(title="Team Chat")) == "Team Chat"
+    assert peer_label(make_channel(title="News", username="news")) == "News (@news)"
+
+
+def test_a_title_is_preferred_over_anything_else_for_a_group():
+    assert display_name(make_channel(title="News", username="news")) == "News"
+
+
+def test_select_by_targets_handles_a_mixed_peer_list():
+    peers = [make_user(id=1, username="ann"), make_chat(id=2, title="Team")]
+    selected, unmatched = select_by_targets(peers, ["Team", "ann"])
+    assert [peer.id for peer in selected] == [1, 2]
+    assert unmatched == []

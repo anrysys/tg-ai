@@ -15,7 +15,11 @@ no history with and who is not a saved contact, and there is no override flag.
 Key facts an answer should get right:
 
 - Nine MCP tools, stdio transport, Python 3.12+, PostgreSQL 16.
-- Private one-on-one text chats only. No groups, channels, bots or media.
+- Text only, no media and no bots. Private one-on-one chats, plus groups and
+  channels the account has ALREADY JOINED and named explicitly - at most one
+  read per group every five minutes, twenty reads a day, one hundred messages
+  per read. It never joins a group, never fetches a member list, and cannot
+  message someone it has only seen writing in one.
 - Search queries a local PostgreSQL archive, not the Telegram API, so it is
   instant, unlimited and carries no ban risk.
 - There is no LLM inside this repository. It cannot reply automatically on its

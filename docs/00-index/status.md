@@ -3,7 +3,7 @@ id: DOC-STATUS
 title: Project status
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-ROADMAP, DOC-TASK-QUEUE]
 ---
 
@@ -14,18 +14,21 @@ Replace stale lines rather than appending to them.
 
 ## Current state
 
-**The code is complete and verified. The project has never been run against a
-real Telegram account** - that is M5, and it requires the user.
+**Groups and channels are supported as of M7, behind a safety envelope that
+also fixed four defects in the pre-existing private-chat code.** The code has
+now been exercised against the real account for reads and syncs; **no message
+has ever been sent** by this project, which is still M5 and needs the user.
 
 | Area | State |
 | --- | --- |
 | Scaffolding, tooling | Done. `just check` green |
-| Safety primitives | Done. 53 offline tests passing |
+| Safety primitives | Done. Chunking, pacing, error translation, plus the persisted RPC limiter, budgets, kill switch and quiet window |
 | Database schema and access | Done. Verified live against PostgreSQL 16 |
-| `auth.py` | Written, **never executed** - needs real credentials |
-| `sync_db.py` | Written, **never executed against Telegram**. Supports `--targets` for a partial first backfill |
-| `server.py` | Done. Verified over a real MCP stdio session. Nine tools |
+| `auth.py` | Written, **never executed** - a session already exists, so re-login has not been needed |
+| `sync_db.py` | Verified against the real account. `--targets` also selects groups and channels, capped at 5 per run and one request each |
+| `server.py` | Done. Nine tools, all verified against the real account. Reads groups and channels under a persisted cooldown |
 | Dialog Persona | Code complete (M6). Exercised end to end against the live PostgreSQL with fixture data; never yet written for a real person |
+| Groups and channels | Code complete (M7). Read, sync, send guard and caps all verified live |
 | Documentation base | Done |
 | Public presentation | Done. README rewritten for discoverability, `USE-CASES.md` added, Russian mirror under `docs/i18n/ru/`, generated GitHub Pages site with JSON-LD |
 
@@ -33,7 +36,9 @@ real Telegram account** - that is M5, and it requires the user.
 
 Empirically, on this machine:
 
-- 152 offline tests pass; `ruff` and `black` clean.
+- 336 offline tests pass, 1 skipped (`FloodPremiumWaitError` does not exist in
+  telethon 1.36.0, and the test says so rather than pretending to cover it);
+  `ruff` and `black` clean.
 - CI reproduces that result again. It had been failing on `main`: `ci.yml`
   invoked bare `pytest`, which leaves the repository root off `sys.path`,
   so `tests/conftest.py` could not `import tg_ai`. Both the failure and the
@@ -47,8 +52,8 @@ Empirically, on this machine:
 - A real MCP client completed `initialize`, `list_tools` and `call_tool` against
   `server.py` over stdio. All tools registered with correct schemas, and
   stdout carried protocol traffic only. `list_tools` now reports nine.
-- `markdownlint-cli2`: 0 issues across 53 markdown files.
-- `scripts/check_links.py`: 271 relative links resolve.
+- `markdownlint-cli2`: 0 issues across the markdown tree.
+- `scripts/check_links.py`: 310 relative links resolve.
 - The generated site rebuilds byte-identically from `README.md` and
   `USE-CASES.md` (`just site-check`), and its JSON-LD parses as one
   `SoftwareApplication`, one `HowTo` of 9 steps and one `FAQPage` of 9
@@ -77,14 +82,54 @@ Empirically, on this machine:
 - Freshness flipped to `STALE - volume (80 of your messages archived since)`
   after that, naming the axis that fired.
 
+Against the real account, on 2026-09-07 (M7):
+
+- The RPC limiter meters real traffic: `just tg-status` reported `57/60`
+  requests left after a connect, and `api_call_log` showed the three connect
+  RPCs spaced 1.75 s and 1.59 s apart - both above the 1.5 s floor, both
+  jittered.
+- Syncing one group produced **exactly one** `GetHistoryRequest` and 100 rows.
+  A second run added 0. A run naming 6 groups aborted at the cap of 5, naming
+  all six. **No read receipt of any kind was sent** - provable because every
+  RPC is now logged and no `ReadHistory` appears.
+- The group read cooldown **survives a process restart**: a brand new
+  interpreter still refused, naming the seconds remaining. That is the whole
+  argument for keeping this state in PostgreSQL.
+- A send to a channel the account only subscribes to was refused for lack of
+  posting rights, with no API call. A 9000-character group message was refused
+  rather than split. `@durov`, a channel this account has not joined, was
+  refused without contacting Telegram at all.
+- Both Persona tools refused a group.
+- `just tg-sync` refused to start while another process held the connection
+  lock, exited 1, and **created no session clone**.
+- A synthetic quiet window blocked a sync before it cloned anything; a manually
+  tripped kill switch blocked it with a message rather than a traceback.
+- The `contacts.getContacts` hash now earns `contactsContactsNotModified`. Two
+  bugs were found only by running it: the field is a **signed** long (the
+  unsigned accumulator raised `struct.error`), and the documented algorithm
+  folds in `saved_count`, which on this account is 372 against 502 returned
+  users.
+- The peer index classified 198 dialogs as 125 users, 59 channels and 14
+  groups; the two channels the account administers reported `can_post=True` and
+  every subscriber-only channel `False`.
+- Three safety tests were checked by deliberately breaking the code: removing
+  the limiter's re-entrancy guard makes both nested tests fail in ~2 s rather
+  than hang, removing the cold-resolution guard makes the peer tests fail on
+  "the client was called", and adding a blacklisted name to `server.py` fails
+  the source scan.
+
 ## Not yet verified
 
 Everything requiring a real account. See M5 in the
 [roadmap](../60-delivery/roadmap.md) and the manual checklist in
 [qa-and-testing.md](../50-process/qa-and-testing.md).
 
-- Any real send, therefore the Send Guard end to end.
-- A full backfill (`just tg-sync-full`); the archive holds 5 dialogs, not all.
+- Any real send, therefore the Send Guard end to end. Every refusal path has
+  been exercised; no successful send has.
+- A full backfill (`just tg-sync-full`); the archive holds 7 dialogs, not all.
+  It will now also meet the 500/day request budget and resume the next day.
+- Sustained use over days, which is what would show whether the flood log
+  stays empty in practice (M7).
 - Whether a reply drafted from a Dialog Persona actually reads as the user's own.
   Only the user can judge that (TASK-011).
 - Pattern Drift on real data: it needs a persona old enough to have drifted.
@@ -98,14 +143,16 @@ section last said otherwise.
 
 | Fact | Value |
 | --- | --- |
-| Messages | 17,306 |
-| Dialogs | 5 |
-| Coverage | 2019-01-03 .. 2026-09-03 |
-| Last sync | 2026-09-04 |
+| Messages | 18,449 |
+| Dialogs | 7 - six private, one group |
+| Coverage | 2019-01-03 .. 2026-09-07 |
+| Last sync | 2026-09-07 |
 | Dialog Personas | 0 - none written yet (TASK-011) |
 
-Numbers read from `db.archive_stats` on 2026-09-04. A full backfill has not been
-confirmed, so TASK-008 stays open until `just tg-sync-full` completes.
+Numbers read from `db.archive_stats` on 2026-09-07. A full backfill has not been
+confirmed, so TASK-008 stays open until `just tg-sync-full` completes. The one
+group holds exactly 100 messages, which is one request: group history is a
+rolling window rather than a backfill (`SPEC-SYNC-007`).
 
 ## Environment facts
 
@@ -119,6 +166,9 @@ confirmed, so TASK-008 stays open until `just tg-sync-full` completes.
 
 ## Next action
 
-Write a Dialog Persona for the busiest dialog with
+Two, in either order. Write a Dialog Persona for the busiest dialog with
 `tg_get_dialog_persona` then `tg_set_dialog_persona`, draft one reply from it,
-and judge whether it reads as the user's own - TASK-011.
+and judge whether it reads as the user's own - TASK-011. And **set
+`TG_LANG_CODE` in `.env` to the language of the Telegram app on the phone**: it
+currently defaults to `en`, which is the safe default for a public repository
+and the wrong value for most people (`SPEC-SEC-007`, TASK-014).
