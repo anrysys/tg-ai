@@ -1741,14 +1741,27 @@ The archive is a full plaintext copy of every private conversation.
 acceptable **only** because the port is unreachable off-host; exposing it
 without changing them would be a serious defect.
 
-### RISK-05 - Connecting from an unfamiliar IP
+### RISK-05 - Connecting from an unfamiliar or datacentre IP
 
 Telegram treats a sudden connection from a new country or a datacentre range as
-a compromise signal, especially combined with scripted behaviour.
+a compromise signal, especially combined with scripted behaviour. Where the
+MTProto packets come from is the strongest userbot signal there is, and it
+outweighs every pacing constant in this project: a perfectly paced client on a
+rented server is banned, a sloppy one on a home laptop usually is not.
 
-**Mitigation.** Local-only deployment. Do not run this on a VPS, do not route it
-through a VPN the account has never used, and do not run the sync from a
-different machine than the one the user's Telegram normally runs on.
+Two IPs on one authorization key is also the documented trigger for
+`AUTH_KEY_DUPLICATED` - see [RISK-08](#risk-08---the-session-is-revoked-by-a-duplicated-key).
+
+**Mitigation.** Local-only deployment, stated as a requirement rather than a
+recommendation in `SPEC-SEC-006`: the user's own machine, the user's own
+network, never a VPS or container platform, never a shared or rotating VPN, and
+`server.py` and `sync_db.py` always over the same path. There is deliberately no
+flag that relaxes it. `tg_whoami` reports `client.session.dc_id`, so a silent
+relocation of the account becomes visible immediately.
+
+This one binds the operator, not the code. No test can prove where a process is
+running; the controls are the requirement, the absence of an override, and the
+`dc_id` readout.
 
 ### RISK-06 - Prompt injection through message content
 
@@ -1798,6 +1811,34 @@ Note that the verbatim samples returned by `tg_get_dialog_persona` are message
 text by design - measurements alone cannot convey a voice. They are
 outgoing-only, but the account's own messages can still quote or forward an
 attacker's words, so they carry the same data-not-instructions fence.
+
+### RISK-08 - The session is revoked by a duplicated key
+
+The Session Clone that `sync_db.py` uses (ADR-0004) carries the **same**
+authorization key as the primary Session. Two live MTProto connections on one
+key past Telegram's limit produce `AUTH_KEY_DUPLICATED`, and its documentation
+is explicit that "the session is already invalidated" when the error arrives.
+
+There is no warning that comes early enough to back off. The account owner loses
+the login outright and recovers only with a fresh SMS code. Before this was
+guarded, nothing stopped `just tg-sync` running while an agent session held the
+server open - and `--in-place` being described as "the unsafe mode" implied the
+clone was the safe one, which is backwards.
+
+**Mitigation.** An exclusive `flock` on `<session_name>.lock`, taken by whichever
+process is about to connect and keyed to the primary Session name so the server
+and the sync contend for the same file (`SPEC-SEC-010`,
+[ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md)).
+The loser exits rather than waiting. `sync_db.py` takes the lock before cloning,
+so a locked-out run also cannot produce a torn copy of a live SQLite file.
+`AuthKeyDuplicatedError` is translated to say plainly that the session is
+already dead, because an untranslated error invites a retry and there is nothing
+left to retry.
+
+**If it happens.** Follow
+[the revoked-session runbook](runbooks/session-lost-or-revoked.md). Re-authenticate
+with `just tg-auth`, and delete the stale clone - it holds a key that is now
+invalid but was, until that moment, a full credential.
 
 ## Rules
 

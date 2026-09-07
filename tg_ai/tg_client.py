@@ -8,12 +8,14 @@ therefore prefers peers the account already knows (SPEC-SND-001).
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 from telethon import TelegramClient
 from telethon.tl.functions.contacts import GetContactsRequest
@@ -327,3 +329,81 @@ async def has_conversation(client: TelegramClient, user: User) -> bool:
     """
     messages = await client.get_messages(user, limit=1)
     return len(messages) > 0
+
+
+class SessionLocked(ToolError):
+    """Another process already holds this account's connection lock."""
+
+
+class SessionLock:
+    """Exclusive lock over one authorization key (SPEC-SEC-010, ADR-0010).
+
+    ADR-0004 has ``sync_db.py`` work on a copy of the session file so two
+    processes never write one SQLite database. That solved the file-locking
+    problem and left a worse one open: the clone carries the *same*
+    authorization key, and Telegram punishes parallel connections on one key
+    with ``AUTH_KEY_DUPLICATED``. That error is not a warning - by the time it
+    arrives the login is already invalidated and only a fresh SMS code brings
+    it back.
+
+    So the clone is safe only under mutual exclusion, and this is it. The
+    lock is advisory (``flock``) and lives on a file next to the session; the
+    kernel releases it when the holder exits or crashes, so a killed process
+    can never leave a stale lock behind.
+
+    The loser does not wait and does not retry. Queueing behind a running
+    sync would just connect later and hit the same wall.
+    """
+
+    def __init__(self, path: Path, holder: str) -> None:
+        self._path = path
+        self._holder = holder
+        self._handle: TextIO | None = None
+
+    def acquire(self) -> None:
+        """Take the lock, or raise naming whoever holds it.
+
+        Raises:
+            SessionLocked: Another process is already connected on this key.
+        """
+        if self._handle is not None:
+            return
+
+        handle = self._path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.seek(0)
+            occupant = handle.read().strip() or "another tg-ai process"
+            handle.close()
+            raise SessionLocked(
+                f"{occupant} is already connected to Telegram with this "
+                "session. Two live connections on one authorization key make "
+                "Telegram invalidate the login outright (AUTH_KEY_DUPLICATED), "
+                "and recovering from that needs a new SMS code. Let the other "
+                "process finish, then try again. Nothing was connected."
+            ) from exc
+
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{self._holder} (pid {os.getpid()})")
+        handle.flush()
+        self._handle = handle
+        log.debug("session lock acquired: %s", self._path.name)
+
+    def release(self) -> None:
+        """Drop the lock. Safe to call when it was never taken."""
+        if self._handle is None:
+            return
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._handle.close()
+            self._handle = None
+
+    def __enter__(self) -> SessionLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.release()

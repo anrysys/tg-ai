@@ -102,6 +102,16 @@ class Config:
         """Absolute path to the session clone as it exists on disk."""
         return PROJECT_ROOT / f"{self.session_name}.sync.session"
 
+    @property
+    def session_lock_file(self) -> Path:
+        """Path of the lock that serialises connections on this auth key.
+
+        Deliberately derived from the primary session name, never from the
+        clone: the clone shares the primary's authorization key, so the two
+        processes must contend for the *same* lock (ADR-0010).
+        """
+        return PROJECT_ROOT / f"{self.session_name}.lock"
+
 
 def _default_system_version() -> str:
     """A coarse, stable description of this machine.

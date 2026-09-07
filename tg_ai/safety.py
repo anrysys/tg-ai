@@ -159,6 +159,20 @@ def describe_telegram_error(exc: BaseException) -> str | None:
             "The MCP server cannot operate. Contact Telegram support."
         )
 
+    if isinstance(exc, errors.AuthKeyDuplicatedError):
+        # Deliberately worded to stop a retry. By the time this arrives the
+        # login is already gone - Telegram's own documentation says the session
+        # "is already invalidated" - so an agent that reads a vague message and
+        # tries again is only wasting the user's time (SPEC-SEC-010, RISK-08).
+        return (
+            "ERROR: This session was invalidated because another connection "
+            "used the same authorization key (AUTH_KEY_DUPLICATED). The login "
+            "is already gone and retrying cannot bring it back. This normally "
+            "means a sync ran while the server was connected. Run `just "
+            "tg-auth` in a terminal to sign in again, and delete the stale "
+            "tg_session.sync.session clone."
+        )
+
     if isinstance(exc, errors.AuthKeyUnregisteredError | errors.SessionRevokedError):
         return (
             "ERROR: The Telegram session is no longer valid - it was revoked or "

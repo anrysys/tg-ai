@@ -18,7 +18,13 @@ import sys
 from telethon import TelegramClient
 
 from tg_ai.config import ConfigError, load_config
-from tg_ai.tg_client import build_client, peer_label, secure_session_file
+from tg_ai.tg_client import (
+    SessionLock,
+    SessionLocked,
+    build_client,
+    peer_label,
+    secure_session_file,
+)
 
 
 async def main() -> int:
@@ -32,6 +38,15 @@ async def main() -> int:
     if config.session_file.exists():
         print("A session already exists. Logging in again will reuse it if it is valid.")
 
+    # Logging in is still a connection on this authorization key, so it
+    # contends for the same lock as the server and the sync (ADR-0010).
+    lock = SessionLock(config.session_lock_file, "a login")
+    try:
+        lock.acquire()
+    except SessionLocked as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+
     client: TelegramClient = build_client(config)
     try:
         # start() drives the phone -> code -> 2FA password prompts itself.
@@ -43,6 +58,7 @@ async def main() -> int:
     finally:
         if client.is_connected():
             await client.disconnect()
+        lock.release()
 
     secure_session_file(config.session_file)
 

@@ -513,3 +513,131 @@ normally connects from.
 the account. A sudden connection from an unfamiliar IP or datacentre range is
 itself a ban signal.
 **Test.** `docker compose ps` shows `127.0.0.1:5434->5432/tcp`, never `0.0.0.0`.
+
+### SPEC-SEC-006 - One machine, one network, one api_id
+
+**Requirement.** The MCP server and `sync_db.py` MUST run on the account
+owner's ordinary personal machine, on the ordinary network that account already
+connects from. They MUST NOT run on a VPS, cloud host, container platform, CI
+runner or any datacentre IP range, and MUST NOT use a shared VPN or any proxy
+that rotates its exit address. If a proxy is unavoidable it MUST be a single
+stable endpoint configured once and used identically by every process.
+
+The project MUST use exactly one `api_id`/`api_hash` pair, the account owner's
+own, obtained from <https://my.telegram.org>. `auth.py`, `server.py` and
+`sync_db.py` share it. A published, sample or borrowed `api_id` MUST NOT be
+used, and a second `api_id` MUST NOT be introduced for the sync process.
+
+There is deliberately **no** environment flag, CLI argument or configuration
+override that relaxes any of this.
+
+**Rationale.** Where the MTProto packets come from is the strongest userbot
+signal Telegram has, and it dominates every pacing constant in this project: a
+perfectly paced client on a datacentre IP is banned, a sloppy one on a home
+laptop usually is not. Two IPs on one authorization key is the documented
+trigger for `AUTH_KEY_DUPLICATED` (`SPEC-SEC-010`). Telegram answers a reused
+published `api_id` with `API_ID_PUBLISHED_FLOOD` and treats the account behind
+it as an abuser; it binds one `api_id` per phone number, so changing it later is
+a new fingerprint on an account already under observation, not a recovery.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tg_whoami` reports `client.session.dc_id`, so a silent relocation of
+the account is visible immediately. The locality rule itself binds the operator
+and is enforced by documentation, not by code - see
+[RISK-05](../70-ops/security.md#risk-05---connecting-from-an-unfamiliar-or-datacentre-ip).
+
+### SPEC-SEC-007 - The Client Identity is configured, honest and frozen
+
+**Requirement.** `build_client` MUST pass `device_model`, `system_version`,
+`app_version`, `lang_code` and `system_lang_code` from `Config` on every
+client it constructs, and MUST be the only place a client is constructed. The
+values MUST be identical for the primary Session and the Session Clone.
+
+`app_version` MUST name this application and MUST NOT claim to be an official
+Telegram client. `lang_code` and `system_lang_code` MUST be configurable and
+default to `en`; the documentation MUST warn that the default is unsafe unless
+it matches the account's real Telegram app language.
+
+Once a Session exists these values MUST be treated as immutable.
+
+**Rationale.** Telegram already knows this client is unofficial, because it
+knows the `api_id`. A personal `api_id` announcing itself as official Telegram
+Desktop is a trivially detectable inconsistency, and an inconsistency that can
+only be deliberate reads worse than an unfamiliar but honest client. What
+actually protects the account is stability: `initConnection` is re-sent on every
+reconnection, so changing these strings makes the account's own "active
+sessions" entry mutate under the user - support-visible, and a signal.
+Telethon's defaults would otherwise announce Telethon on Python with
+`lang_code='en'` whatever language the account really uses.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_client_contract.py` - in particular
+`test_identity_is_identical_for_the_primary_session_and_the_clone` and
+`test_the_app_version_never_claims_to_be_an_official_client`.
+
+### SPEC-SEC-008 - The Telethon constructor contract
+
+**Requirement.** `build_client` MUST pass every one of these explicitly rather
+than inheriting Telethon's default:
+
+| Parameter | Required value |
+| --- | --- |
+| `flood_sleep_threshold` | `0` |
+| `receive_updates` | `False` |
+| `catch_up` | `False` |
+| `request_retries` | `1` |
+| `connection_retries` | `2` |
+| `retry_delay` | `5` |
+| `auto_reconnect` | `True` |
+| `entity_cache_limit` | `500` |
+
+**Rationale.** `flood_sleep_threshold` is the load-bearing one. Telethon's
+default of `60` makes the library sleep on - that is, silently retry - every
+flood wait of 60 seconds or less. Scraping-induced waits are typically 5-30
+seconds, so with the default every one is invisible: the `FloodWaitError`
+handling in `sync_db.py` and the kill switch (`SPEC-LIM-003`) would be dead
+code, while flood *frequency* is exactly what feeds Telegram's risk score.
+`request_retries=5` turns one failing request into six. `connection_retries` and
+`retry_delay` bound the handshake burst a network blip would otherwise produce,
+since every reconnect replays `initConnection`. `entity_cache_limit` caps how
+many strangers' access hashes accumulate in the Session file that
+`clone_session()` copies on every run.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_client_contract.py::test_every_risky_telethon_default_is_pinned`,
+parametrised over the whole table, plus
+`test_flood_waits_are_never_slept_through`.
+
+### SPEC-SEC-009 - No update stream, and no event handlers
+
+**Requirement.** The client MUST be constructed with `receive_updates=False`
+and `catch_up=False` (`SPEC-SEC-008`), and the codebase MUST register **zero**
+Telethon event handlers.
+
+**Rationale.** With group and channel support, a subscribed client would receive
+an update for every message in every group the account belongs to - a large
+traffic fingerprint for a client that never reads any of them, and a route to
+`updatesTooLong`, which triggers `updates.getDifference` and a bulk history
+fetch. The handler ban exists because the two rules interact badly: with
+updates off a handler silently never fires, which reads as a bug, and the
+obvious "fix" is to turn updates back on. Forbidding handlers outright removes
+the temptation.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_client_contract.py::test_the_codebase_registers_no_telethon_event_handlers`,
+which scans the shipped source for every registration form.
+
+### SPEC-SEC-010 - One connection per authorization key
+
+**Requirement.** Every process MUST hold an exclusive lock on
+`<session_name>.lock` before calling `connect()`, and MUST hold it until it
+disconnects. The lock MUST be derived from the primary Session name, never from
+the Session Clone. A process that cannot take the lock MUST NOT wait or retry:
+`sync_db.py` exits with status 1 and `server.py` returns a `ToolError` naming
+the holder. `sync_db.py` MUST take the lock before cloning the Session.
+
+**Rationale.** The Session Clone carries the *same* authorization key as the
+primary Session, and Telegram answers parallel sessions beyond its limit with
+`AUTH_KEY_DUPLICATED` - at which point, per its own documentation, "the session
+is already invalidated and the user must re-authenticate". There is no warning
+that arrives in time to back off, so the only defence is never to open the
+second connection. Cloning before locking would additionally copy a SQLite file
+the server may be mid-write on.
+**Decided by.** [ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md).
+**Test.** `tests/test_connection_lock.py`.

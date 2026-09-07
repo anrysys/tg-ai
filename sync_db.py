@@ -38,6 +38,8 @@ from tg_ai.config import Config, ConfigError, load_config
 from tg_ai.safety import SYNC_DIALOG_DELAY_SECONDS
 from tg_ai.tg_client import (
     PeerIndex,
+    SessionLock,
+    SessionLocked,
     build_client,
     clone_session,
     is_archivable,
@@ -247,6 +249,14 @@ async def collect_targets(
 
 
 async def run(args: argparse.Namespace, config: Config) -> int:
+    # Taken before anything else touches the session. The clone shares the
+    # primary's authorization key, so a sync running while the MCP server is
+    # connected means two live connections on one key - the documented trigger
+    # for AUTH_KEY_DUPLICATED (ADR-0010). Cloning first would also copy a
+    # SQLite file the server may be writing to, which can yield a torn copy.
+    lock = SessionLock(config.session_lock_file, "a sync")
+    lock.acquire()
+
     session_base = config.session_path if args.in_place else clone_session(config)
     since = parse_since(args.since)
 
@@ -314,6 +324,7 @@ async def run(args: argparse.Namespace, config: Config) -> int:
     finally:
         if client.is_connected():
             await client.disconnect()
+        lock.release()
         await pool.close()
 
 
@@ -334,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return asyncio.run(run(args, config))
+    except SessionLocked as exc:
+        log.error("%s", exc)
+        return 1
     except FileNotFoundError as exc:
         log.error("%s", exc)
         return 1

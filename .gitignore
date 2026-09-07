@@ -2,6 +2,7 @@
 # A .session file contains the full MTProto auth key. Anyone holding it
 # controls the account. See docs/70-ops/security.md.
 *.session
+*.lock
 *.session-journal
 *.session-wal
 *.session-shm

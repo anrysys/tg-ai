@@ -58,6 +58,7 @@ from tg_ai.safety import (
 )
 from tg_ai.tg_client import (
     PeerIndex,
+    SessionLock,
     build_client,
     has_conversation,
     normalise_target,
@@ -77,6 +78,7 @@ mcp = FastMCP("tg-ai")
 _config: Config | None = None
 _client: TelegramClient | None = None
 _index: PeerIndex | None = None
+_lock: SessionLock | None = None
 _pool: asyncpg.Pool | None = None
 
 
@@ -127,6 +129,15 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
         _index = PeerIndex(_client)
 
     if not _client.is_connected():
+        # One connection per authorization key. The sync clone shares this
+        # key, so connecting while a sync runs is what produces
+        # AUTH_KEY_DUPLICATED - which invalidates the login rather than
+        # merely failing the call (SPEC-SEC-010, ADR-0010). Held for the life
+        # of the process; the kernel releases it if we die.
+        global _lock
+        if _lock is None:
+            _lock = SessionLock(config().session_lock_file, "the MCP server")
+        _lock.acquire()
         await _client.connect()
 
     if not await _client.is_user_authorized():

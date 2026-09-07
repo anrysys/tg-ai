@@ -112,3 +112,16 @@ async def test_tool_error_is_reported_without_a_stack_trace():
         raise ToolError("Run `just tg-auth` first.")
 
     assert await tool() == "ERROR: Run `just tg-auth` first."
+
+
+def test_a_duplicated_auth_key_is_reported_as_already_fatal():
+    # The session is dead before this error is visible, so the message must
+    # not invite a retry - an agent reading a vague error will try again
+    # (SPEC-SEC-010, RISK-08).
+    described = describe_telegram_error(
+        errors.AuthKeyDuplicatedError.__new__(errors.AuthKeyDuplicatedError)
+    )
+    assert described is not None
+    assert "AUTH_KEY_DUPLICATED" in described
+    assert "retrying cannot bring it back" in described
+    assert "just tg-auth" in described

@@ -3,7 +3,7 @@ id: DOC-ID-REGISTRY
 title: Identifier registry
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-ROUTER, DOC-SRS, DOC-ADR-INDEX]
 ---
 
@@ -32,6 +32,7 @@ one at the moment you write the thing, and record it here in the same change.
 | `SYNC` | Filling the archive |
 | `PSN` | Per-Dialog style: the Dialog Persona, its measurement, freshness and safety |
 | `SEC` | Credentials, permissions, configuration, locality |
+| `LIM` | Pacing, budgets, the kill switch, the quiet window, blacklisted operations |
 
 ## Allocated
 
@@ -42,7 +43,7 @@ one at the moment you write the thing, and record it here in the same change.
 | `SPEC-SRCH-001` .. `SPEC-SRCH-006` | In use |
 | `SPEC-SYNC-001` .. `SPEC-SYNC-006` | In use |
 | `SPEC-PSN-001` .. `SPEC-PSN-008` | In use |
-| `SPEC-SEC-001` .. `SPEC-SEC-005` | In use |
-| `ADR-0000` .. `ADR-0008` | In use (`0000` is the template) |
-| `RISK-01` .. `RISK-07` | In use |
+| `SPEC-SEC-001` .. `SPEC-SEC-010` | In use |
+| `ADR-0000` .. `ADR-0010` | In use (`0000` is the template) |
+| `RISK-01` .. `RISK-08` | In use |
 | `TASK-001` .. `TASK-013` | In use |
