@@ -160,3 +160,71 @@ def test_jitter_actually_varies_so_the_delay_is_not_a_metronome():
 
 def test_jitter_of_zero_is_zero_rather_than_a_surprise_delay():
     assert jittered(0) == 0.0
+
+
+# --- Error translation for groups and channels (SPEC-SND-004) -------------
+
+
+def build_error(name: str, **attributes):
+    """Construct a Telethon error without running its __init__.
+
+    ``FloodPremiumWaitError`` does not exist in telethon 1.36.0, so it is
+    looked up rather than imported and the test skips it there rather than
+    pretending to cover it.
+    """
+    cls = getattr(errors, name, None)
+    if cls is None:
+        pytest.skip(f"{name} is not defined in this telethon version")
+    error = cls.__new__(cls)
+    error.request = None
+    for key, value in attributes.items():
+        setattr(error, key, value)
+    return error
+
+
+#: Every row of the group/channel error table, with a phrase that proves the
+#: message says the right thing rather than merely saying something.
+TRANSLATED_ERRORS = [
+    ("AuthKeyDuplicatedError", {}, "retrying cannot bring it back"),
+    ("SlowModeWaitError", {"seconds": 30}, "slow mode"),
+    ("FloodPremiumWaitError", {"seconds": 12}, "Telegram API limit reached"),
+    ("ChannelPrivateError", {}, "never joins a channel"),
+    ("ChannelInvalidError", {}, "never joins a channel"),
+    ("ChatAdminRequiredError", {}, "nothing to retry"),
+    ("UserBannedInChannelError", {}, "@SpamBot"),
+    ("ChatGuestSendForbiddenError", {}, "will not join it for you"),
+    ("TakeoutInitDelayError", {"seconds": 3600}, "does not use the takeout API"),
+    ("ApiIdPublishedFloodError", {}, "my.telegram.org"),
+    ("PhoneNumberBannedError", {}, "banned this phone number"),
+]
+
+
+@pytest.mark.parametrize(("name", "attributes", "phrase"), TRANSLATED_ERRORS)
+def test_every_group_and_channel_error_is_translated(name, attributes, phrase):
+    # An untranslated error reaches the agent as a raw class name, which it
+    # will very likely retry - and most of these must never be retried.
+    described = describe_telegram_error(build_error(name, **attributes))
+    assert described is not None, f"{name} reaches the agent as a raw class name"
+    assert described.startswith("ERROR: ")
+    assert phrase in described
+
+
+def test_slow_mode_is_not_mistaken_for_an_ordinary_flood_wait():
+    # SlowModeWaitError is a sibling of FloodWaitError, not a subclass, so it
+    # needs its own branch or it falls through untranslated.
+    assert not issubclass(errors.SlowModeWaitError, errors.FloodWaitError)
+    described = describe_telegram_error(build_error("SlowModeWaitError", seconds=45))
+    assert "45 seconds" in described
+    assert "Do not retry" in described
+
+
+def test_no_translated_message_suggests_joining_or_retrying_its_way_out():
+    # These messages are read by an agent looking for a next action, so none of
+    # them may hint at joining a channel or hammering the same call.
+    for name, attributes, _ in TRANSLATED_ERRORS:
+        cls = getattr(errors, name, None)
+        if cls is None:
+            continue
+        described = describe_telegram_error(build_error(name, **attributes)).lower()
+        assert "try again immediately" not in described
+        assert "join the channel" not in described

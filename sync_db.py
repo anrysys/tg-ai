@@ -38,6 +38,11 @@ from telethon.tl.types import User
 from tg_ai import db
 from tg_ai.config import Config, ConfigError, load_config
 from tg_ai.safety import (
+    CHANNEL_SYNC_DELAY_SECONDS,
+    GROUP_FETCH_LIMIT,
+    GROUP_READ_SCOPE,
+    GROUP_READS_PER_DAY,
+    GROUP_TARGETS_PER_RUN,
     SYNC_DIALOG_DELAY_SECONDS,
     ToolError,
     in_quiet_window,
@@ -45,15 +50,19 @@ from tg_ai.safety import (
     quiet_window_message,
 )
 from tg_ai.tg_client import (
+    PEER_TYPE_USER,
     PeerIndex,
     RpcGuard,
     SessionLock,
     SessionLocked,
     build_client,
+    can_post,
     clone_session,
     is_archivable,
+    is_member,
     matches_target,
     peer_label,
+    peer_type,
     resolve_peer,
 )
 
@@ -197,6 +206,60 @@ async def sync_dialog(
     return added, cursor
 
 
+async def sync_group(
+    client: TelegramClient,
+    pool: asyncpg.Pool,
+    entity: object,
+    *,
+    start_cursor: int,
+) -> tuple[int, int]:
+    """Archive the newest messages of one Group or Channel (SPEC-SYNC-007).
+
+    **Exactly one API call.** Telegram's limits count RPCs, not messages, and
+    one ``messages.getHistory`` returns up to 100. Paginating would be several
+    requests per target, which is the scraper signature this whole path exists
+    to avoid, so the limit is hardcoded rather than configurable.
+
+    The honest consequence: this is a **rolling window, not a backfill**. A busy
+    group that produced more than 100 messages since the last run leaves a
+    permanent gap, because the cursor moves to the newest message archived. That
+    is the deliberate trade - a complete group history is not worth looking like
+    a scraper for.
+
+    Returns:
+        ``(rows_added, final_cursor)``.
+    """
+    messages = await client.get_messages(entity, limit=GROUP_FETCH_LIMIT, min_id=start_cursor)
+    if not messages:
+        return 0, start_cursor
+
+    rows = [
+        (
+            entity.id,
+            message.id,
+            message.sender_id,
+            message.message or None,
+            message.date,
+            bool(message.out),
+        )
+        for message in messages
+    ]
+    added = await db.insert_messages(pool, rows)
+    cursor = max(start_cursor, max(row[1] for row in rows))
+    await db.advance_cursor(pool, entity.id, cursor)
+
+    if len(messages) >= GROUP_FETCH_LIMIT:
+        log.warning(
+            "  %s produced at least %d messages since the last run; only the "
+            "newest %d were archived and the rest are a permanent gap. This is "
+            "the one-request limit working as intended, not a failure.",
+            peer_label(entity),
+            GROUP_FETCH_LIMIT,
+            GROUP_FETCH_LIMIT,
+        )
+    return added, cursor
+
+
 def select_by_targets(users: list[User], targets: list[str]) -> tuple[list[User], list[str]]:
     """Filter archivable dialogs down to the requested people (SPEC-SYNC-006).
 
@@ -243,20 +306,28 @@ async def collect_targets(
         user, _ = await resolve_peer(client, index, only)
         return [user]
 
-    users: list[User] = []
-    async for dialog in client.iter_dialogs():
-        entity = dialog.entity
-        if is_archivable(entity, include_bots=config.sync_include_bots):
-            users.append(entity)
+    # Groups and Channels are reachable ONLY through --targets. A run with no
+    # Target Filter is exactly what it always was (SPEC-SYNC-001).
+    include_groups = bool(targets)
+
+    peers: list[object] = []
+    for record in await index.dialogs():
+        entity = record.entity
+        if is_archivable(
+            entity, include_bots=config.sync_include_bots, include_groups=include_groups
+        ):
+            peers.append(entity)
 
     if not targets:
-        return users
+        return peers
 
-    selected, unmatched = select_by_targets(users, targets)
+    selected, unmatched = select_by_targets(peers, targets)
     if unmatched:
         log.warning(
-            "No private dialog matched: %s. Check the spelling, or use "
-            "--dialog to reach someone you have never messaged.",
+            "Nothing in your dialog list matched: %s. Check the spelling, or "
+            "use --dialog to reach a person you have never messaged. Groups "
+            "and channels can only be matched here - there is no way to reach "
+            "one you have not joined.",
             ", ".join(unmatched),
         )
     return selected
@@ -303,33 +374,97 @@ async def run(args: argparse.Namespace, config: Config) -> int:
         index = PeerIndex(client, store=db.PostgresContactStore(pool))
         targets = await collect_targets(client, index, config, args.dialog, args.targets)
         if args.targets and not targets:
-            log.error("None of the requested targets has a private dialog. Nothing to sync.")
+            log.error("None of the requested targets is in your dialog list. Nothing to sync.")
             return 1
+
+        groups = [peer for peer in targets if peer_type(peer) != PEER_TYPE_USER]
+        if len(groups) > GROUP_TARGETS_PER_RUN:
+            # Volume, not spacing, is what a fraud model scores. Refuse rather
+            # than silently truncating, so the user chooses which ones matter.
+            log.error(
+                "%d group/channel targets requested; the cap is %d per run "
+                "(SPEC-SYNC-007). Nothing was synced. Split them across runs: %s",
+                len(groups),
+                GROUP_TARGETS_PER_RUN,
+                ", ".join(peer_label(peer) for peer in groups),
+            )
+            return 1
+
+        if groups:
+            ledger = db.PostgresRpcLedger(pool)
+            already = await ledger.count_calls(GROUP_READ_SCOPE, 24 * 3600)
+            if already + len(groups) > GROUP_READS_PER_DAY:
+                log.error(
+                    "This run would make %d group/channel reads and %d of the "
+                    "%d allowed in a rolling 24 hours have already been used. "
+                    "Nothing was synced (SPEC-SYNC-007).",
+                    len(groups),
+                    already,
+                    GROUP_READS_PER_DAY,
+                )
+                return 1
+
         contact_ids = await index.contact_ids()
-        log.info("%d private dialog(s) to process", len(targets))
+        log.info(
+            "%d dialog(s) to process (%d group/channel)",
+            len(targets),
+            len(groups),
+        )
 
         total_added = 0
-        for position, user in enumerate(targets, start=1):
-            await db.upsert_dialog(
-                pool,
-                chat_id=user.id,
-                username=user.username,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                phone=user.phone,
-                is_contact=user.id in contact_ids,
-            )
+        for position, peer in enumerate(targets, start=1):
+            kind = peer_type(peer)
+            is_group = kind != PEER_TYPE_USER
 
-            start_cursor = 0 if args.full else await db.get_cursor(pool, user.id)
-            added, cursor = await sync_dialog(
-                client, pool, user, start_cursor=start_cursor, limit=args.limit, since=since
-            )
+            if is_group:
+                # A Group has no first or last name; its title goes in
+                # first_name so display_name and the Dialog Lookup keep working.
+                await db.upsert_dialog(
+                    pool,
+                    chat_id=peer.id,
+                    username=getattr(peer, "username", None),
+                    first_name=getattr(peer, "title", None),
+                    last_name=None,
+                    phone=None,
+                    is_contact=False,
+                    peer_type=kind,
+                )
+                await db.record_peer_snapshot(
+                    pool,
+                    peer_id=peer.id,
+                    peer_type=kind,
+                    username=getattr(peer, "username", None),
+                    title=getattr(peer, "title", None),
+                    is_member=is_member(peer),
+                    can_post=can_post(peer),
+                )
+            else:
+                await db.upsert_dialog(
+                    pool,
+                    chat_id=peer.id,
+                    username=peer.username,
+                    first_name=peer.first_name,
+                    last_name=peer.last_name,
+                    phone=peer.phone,
+                    is_contact=peer.id in contact_ids,
+                    peer_type=PEER_TYPE_USER,
+                )
+
+            start_cursor = 0 if args.full else await db.get_cursor(pool, peer.id)
+            if is_group:
+                added, cursor = await sync_group(client, pool, peer, start_cursor=start_cursor)
+                await db.PostgresRpcLedger(pool).record_call(GROUP_READ_SCOPE, str(peer.id))
+            else:
+                added, cursor = await sync_dialog(
+                    client, pool, peer, start_cursor=start_cursor, limit=args.limit, since=since
+                )
             total_added += added
             log.info(
-                "[%d/%d] %s  +%d msgs  (cursor %s)",
+                "[%d/%d] %-7s %s  +%d msgs  (cursor %s)",
                 position,
                 len(targets),
-                peer_label(user),
+                kind,
+                peer_label(peer),
                 added,
                 cursor,
             )
@@ -348,9 +483,12 @@ async def run(args: argparse.Namespace, config: Config) -> int:
 
             # Pace the walk: dozens of history requests per second is a
             # scripted-account signal even though nothing is being sent.
-            # Jittered, because a metronome is itself a pattern.
+            # Channels get a much longer gap - jumping between them faster than
+            # a human can click is what anti-bot heuristics look for. Jittered,
+            # because a metronome is itself a pattern.
             if position < len(targets):
-                await asyncio.sleep(jittered(SYNC_DIALOG_DELAY_SECONDS))
+                gap = CHANNEL_SYNC_DELAY_SECONDS if is_group else SYNC_DIALOG_DELAY_SECONDS
+                await asyncio.sleep(jittered(gap))
 
         stats = await db.archive_stats(pool)
         log.info(

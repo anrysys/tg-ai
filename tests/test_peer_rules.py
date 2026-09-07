@@ -16,6 +16,7 @@ from tg_ai.tg_client import (
     matches_target,
     normalise_target,
     peer_label,
+    peer_match_keys,
     peer_type,
 )
 
@@ -322,3 +323,44 @@ def test_the_hash_does_not_depend_on_iteration_order():
 
 def test_a_changed_contact_list_changes_the_hash():
     assert contacts_hash(3, {1, 2, 3}) != contacts_hash(3, {1, 2, 4})
+
+
+# --- Targets and labels for the widened Peer model ------------------------
+
+
+def test_a_group_is_matched_by_its_title():
+    group = make_chat(title="Team Chat")
+    assert matches_target(group, "Team Chat")
+    assert matches_target(group, "team  chat")
+    assert not matches_target(group, "Team")
+
+
+def test_a_channel_is_matched_by_title_username_or_id():
+    channel = make_channel(id=777, title="Remote All", username="remoteall", megagroup=True)
+    assert matches_target(channel, "Remote All")
+    assert matches_target(channel, "@remoteall")
+    assert matches_target(channel, "777")
+
+
+def test_matching_a_group_does_not_read_user_only_fields():
+    # Regression: peer_match_keys read `.phone` and `.first_name` directly, so
+    # naming any group in --targets raised AttributeError. The three Peer Types
+    # genuinely do not share a shape.
+    for peer in (make_chat(), make_channel(broadcast=True), make_channel(megagroup=True)):
+        assert peer_match_keys(peer)
+
+
+def test_a_group_gets_a_readable_label():
+    assert peer_label(make_chat(title="Team Chat")) == "Team Chat"
+    assert peer_label(make_channel(title="News", username="news")) == "News (@news)"
+
+
+def test_a_title_is_preferred_over_anything_else_for_a_group():
+    assert display_name(make_channel(title="News", username="news")) == "News"
+
+
+def test_select_by_targets_handles_a_mixed_peer_list():
+    peers = [make_user(id=1, username="ann"), make_chat(id=2, title="Team")]
+    selected, unmatched = select_by_targets(peers, ["Team", "ann"])
+    assert [peer.id for peer in selected] == [1, 2]
+    assert unmatched == []

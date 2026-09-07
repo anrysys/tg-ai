@@ -34,14 +34,25 @@ filling the archive, `PSN` per-Dialog style, `SEC` credentials and locality,
 
 ### SPEC-SND-001 - The send guard
 
-**Requirement.** `tg_send_message` MUST NOT send anything to a Peer when all of
-the following hold: the Peer is not the account itself, the Peer is absent from
-the Peer Index, no message has ever been exchanged with the Peer, and the Peer
-is not in the account's contacts. In that case it returns a `WARNING:` naming
-`tg_add_contact` as the next step, and sends nothing.
+**Requirement.** For a `User`, `tg_send_message` MUST NOT send anything when
+all of the following hold: the Peer is not the account itself, the Peer is
+absent from the Peer Index, no message has ever been exchanged with the Peer,
+and the Peer is not in the account's contacts. In that case it returns a
+`WARNING:` naming `tg_add_contact` as the next step, and sends nothing.
+
+For a **Group**, it MUST send only when the account is currently a member,
+verified from the Peer Index and never by a cold API call. For a **Channel**, it
+MUST refuse unless the cached entity's `admin_rights.post_messages` is set; a
+plain subscriber MUST be refused **without any API call**. A Group whose
+`default_banned_rights` forbid sending is writable only by an admin.
+
+A Peer known only from a Group message MUST NOT be a send target
+(`SPEC-SND-008`), and a Group or Channel message that would need more than one
+chunk MUST be refused (`SPEC-SND-007`).
 
 There is deliberately **no** `force` parameter. Overriding the guard requires a
-separate, deliberate `tg_add_contact` call.
+separate, deliberate `tg_add_contact` call. The Group and Channel rules are
+strictly additional: nothing about messaging an unknown `User` is relaxed.
 
 The Dialog Lookup path (`SPEC-SRCH-006`) MUST NOT be used to resolve a send
 target. Resolving the target a second way is one of the bypasses ADR-0005
@@ -52,10 +63,15 @@ through a helper that swallows its own failures (`SPEC-PSN-008`).
 **Rationale.** Messaging strangers from a personal account is the primary cause
 of `PeerFloodError` and account bans. An agent acting on an ambiguous
 instruction must not be able to trigger it in one step.
-**Decided by.** [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md).
-**Test.** Manual: `tg_send_message` to a never-contacted account returns the
-warning and the Telegram app shows no sent message. The four conditions are
-readable as one short-circuiting expression in `server.tg_send_message`.
+**Decided by.** [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md),
+extended for Groups and Channels by
+[ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_peer_rules.py` for the posting-rights rules
+(`test_a_channel_subscriber_may_not_post`,
+`test_a_channel_admin_with_post_rights_may_post`,
+`test_a_group_that_bans_sending_is_writable_only_by_an_admin`). Manual:
+`tg_send_message` to a never-contacted account returns the warning and the
+Telegram app shows no sent message.
 
 ### SPEC-SND-002 - Chunking
 
@@ -137,6 +153,45 @@ extended by [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
 `test_a_caller_that_admits_groups_never_gets_a_cold_lookup`, both of which
 assert the client was never called.
 
+### SPEC-SND-007 - A Group message is one message or none
+
+**Requirement.** When the target is a Group or Channel and the body would be
+split into more than one chunk, `tg_send_message` MUST refuse and say so.
+Nothing is sent, including the first chunk.
+
+**Rationale.** `split_message` plus 2.5-second pacing sends N consecutive
+messages. In a private chat that is a long reply; in a group it is flooding,
+and in a slow-mode group the second chunk fails with `SLOWMODE_WAIT_X` - which
+now surfaces as an error rather than being slept through (`SPEC-SEC-008`).
+Refusing up front is better than getting there, and it leaves the user with a
+message that was either sent whole or not at all.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** Manual: a 9000-character body addressed to a group returns
+`ERROR: ... would be sent ... as 3 separate messages` and the Telegram app shows
+nothing. `tg_ai/safety.split_message` is unit-tested separately by
+`tests/test_chunking.py`.
+
+### SPEC-SND-008 - A Peer seen only in a Group is never a target
+
+**Requirement.** A user id whose only provenance is a Group or Channel message
+MUST NOT be resolved, added to the Peer Index, added to contacts, or accepted as
+a send target. `tg_send_message` MUST refuse such a target **before making any
+API call**. `messages.sender_id` MUST carry a schema comment saying it is
+attribution only.
+
+**Rationale.** Telegram delivers those users as
+[`min` constructors](https://core.telegram.org/api/min), whose `access_hash`
+"can't be used to generate a typical `inputPeerUser` constructor to send
+messages or do other actions". Beyond that, assembling a member list one message
+at a time is exactly the scraping that `channels.getParticipants` is banned for
+(`SPEC-LIM-006`) - doing it one id at a time is the same thing, slower. The
+archive is what makes the check possible without asking Telegram: an id that
+appears as a sender in a non-user Dialog and has no Dialog of its own is such a
+Peer.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `db.is_group_only_sender` and its statement; manual: a numeric id
+taken from a group message returns the refusal with nothing requested.
+
 ---
 
 ## RCV - Reading the live account
@@ -157,15 +212,60 @@ agents to misattribute who said what.
 **Test.** `server.tg_get_recent_messages` reverses the Telethon result;
 `formatting.render_conversation` emits the marker.
 
-### SPEC-RCV-003 - Unread listing covers people only
+### SPEC-RCV-003 - Reading is non-destructive, and Groups are rationed
 
 **Requirement.** `tg_get_unread_dialogs` MUST list only 1-on-1 Dialogs with
 non-deleted human users, and MUST exclude bots unless `TG_SYNC_INCLUDE_BOTS`
-is true. Reading it MUST NOT mark anything as read.
+is true. Reading MUST NOT mark anything as read: no code path may call
+`messages.readHistory`, `messages.readMentions`, `channels.readHistory` or
+Telethon's `send_read_acknowledge` (`SPEC-LIM-006`).
+
+`tg_get_recent_messages` MAY read a Group or Channel the account is a member
+of, subject to all of:
+
+| Control | Value |
+| --- | --- |
+| Per-target cooldown | 300 s |
+| Group/Channel reads per rolling 24 h | 20 |
+| Messages per call | 100, which is one API call |
+
+Both counters MUST be stored in PostgreSQL and MUST survive a restart of the
+server. Exceeding either MUST return a `ToolError` naming the remaining wait or
+the cap, and the tool docstring MUST state both numbers and tell the agent not
+to poll.
 
 **Rationale.** Marking messages read as a side effect of a status query would
-make the user's own Telegram client lie to them.
-**Test.** Manual: unread badges in the Telegram app are unchanged after calling.
+make the user's own Telegram client lie to them - and instantly "reading" 100
+messages across several channels is superhuman. The cooldown must be persisted
+because an MCP stdio server is respawned whenever the user reopens their
+editor, so an in-memory cooldown is cleared by the very restart an agent in a
+loop is most likely to cause. The numbers are in the docstring because the
+caller is a model that will otherwise retry rather than stop.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_server_limits.py` - in particular
+`test_the_cooldown_survives_a_process_restart` and
+`test_the_daily_cap_refuses_once_it_is_used_up`; `tests/test_blacklist.py` for
+the read-receipt ban. Manual: unread badges in the Telegram app are unchanged
+after calling.
+
+### SPEC-RCV-005 - One bounded dialog fetch, shared
+
+**Requirement.** `GetDialogs` MUST be bounded by an explicit `limit`, and the
+Peer Index and `tg_get_unread_dialogs` MUST share one fetch rather than each
+walking the list. `tg_get_unread_dialogs` MUST stop after examining a bounded
+number of Dialogs, not after finding a bounded number of unread ones.
+`CACHE_TTL_SECONDS` MUST be at least 600 and MUST NOT be lowered.
+
+**Rationale.** `GetDialogs` is the heaviest call this codebase makes and a
+monitored endpoint. Both previous call sites were unbounded: the Peer Index
+walked every Dialog every 300 seconds, and the unread tool broke only once it
+had collected `limit` *unread* Dialogs - so an account with nothing unread
+walked the entire list on every call. Two independent walks per user question
+is indefensible, and group support only makes the list longer.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** Observed live: one Peer Index refresh over 198 Dialogs costs exactly
+two `GetDialogsRequest` calls in `api_call_log`, and `tg_get_unread_dialogs`
+adds none.
 
 ### SPEC-RCV-004 - Limits are clamped, never rejected
 
@@ -359,6 +459,32 @@ therefore makes no cold `ResolveUsername` call (`SPEC-SND-006`).
 `test_select_by_targets_reports_what_matched_nothing` and
 `test_select_by_targets_keeps_the_newest_active_dialog_order`.
 
+### SPEC-SYNC-007 - Group and Channel syncing is opt-in and capped
+
+**Requirement.** A Group or Channel MUST be synced only when named in
+`--targets`. `--dialog` MUST remain user-only. Each Group or Channel MUST be
+read with **exactly one** `messages.getHistory` of at most 100 messages. A run
+naming more than 5 Group or Channel targets MUST abort with an error naming the
+cap and syncing nothing. A run that would exceed 20 Group or Channel reads in a
+rolling 24 hours MUST abort. Consecutive Group reads MUST be separated by at
+least `CHANNEL_SYNC_DELAY_SECONDS` (15 s) plus jitter.
+
+**Requirement (honesty).** Because the read is capped at one request, Group
+history is a **rolling window, not a backfill**: a Group that produced more than
+100 messages since the last run leaves a permanent gap. The sync MUST say so
+when it happens rather than reporting success silently.
+
+**Rationale.** Telegram's limits count RPCs, not messages, so one call of 100 is
+one unit of risk while pagination is several. Volume matters more than spacing:
+how many distinct channels an account touches per day is more informative to a
+fraud model than the gap between two reads, which is why the caps are on counts
+and the delays are merely floors. A complete group history is not worth looking
+like a scraper for.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** Verified live: syncing one group produced exactly one
+`GetHistoryRequest` in `api_call_log` and 100 rows; a second run added 0; and a
+run naming 6 groups aborted, naming all six.
+
 ---
 
 ## PSN - Per-Dialog style
@@ -481,6 +607,25 @@ database read that could raise after delivery would report `ERROR:` for a
 message that was actually sent, and the agent would send it again.
 **Test.** `server.persona_hint` swallows every exception; the guard, empty-body
 and exception paths of `tg_send_message` are unchanged.
+
+### SPEC-PSN-009 - Personas are for private chats only
+
+**Requirement.** `tg_get_recent_messages` MUST NOT prepend a Persona block when
+the Peer Type is not `user`. `tg_set_dialog_persona` and
+`tg_get_dialog_persona` MUST return a `ToolError` for a Group or Channel, and
+`tg_list_dialog_personas` MUST NOT list one.
+
+**Rationale.** A Dialog Persona models how one person writes to one other
+person. In a Group several people write, so there is no single style to record;
+in a Channel the account usually writes nothing at all, so there is nothing to
+measure. Running the analyser over either produces meaningless numbers and, far
+worse, would let other people's writing shape what the file claims is the
+account owner's own voice - which is then replayed into the drafting context on
+every later read (`RISK-07`).
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** Manual, verified live: both Persona tools return
+`ERROR: ... is a group, and a Dialog Persona describes how the account writes to
+one person`. The overview query filters on `d.peer_type = 'user'`.
 
 ---
 

@@ -187,6 +187,39 @@ the kill switch (`SPEC-LIM-003`). `just tg-status` shows the switch and the
 remaining budget, so the accumulation is visible before it becomes a
 restriction rather than after.
 
+### RISK-10 - The archive becomes a member database nobody asked for
+
+Reading a Group or Channel means storing other people's ids. `messages` already
+has a `sender_id` column, and with group support it fills up with people the
+account owner has never spoken to - potentially thousands of them, from a
+handful of reads.
+
+Two things could turn that into a real problem. The obvious one: someone treats
+`sender_id` as a foreign key to a person and starts resolving those ids, which
+is `channels.getParticipants` reimplemented one message at a time. The quieter
+one: Telethon's own entity cache accumulates the same strangers' access hashes
+inside the session file, and `clone_session()` copies that file on every sync
+run - so a project that only ever *reads* text would still be accumulating an
+addressable index of people who never consented to being in it.
+
+**Mitigation.** Structural, in four places:
+
+1. Ids seen in a Group are `min` constructors and cannot address anyone
+   anyway; the schema says so in a `COMMENT ON COLUMN`, because the next
+   person to read it would otherwise assume it is a foreign key.
+2. `tg_send_message` refuses a Peer whose only provenance is a Group message,
+   before making any API call (`SPEC-SND-008`).
+3. The whole harvesting family - `inputPeerUserFromMessage`,
+   `contacts.search`, `messages.getCommonChats`,
+   `messages.getMessageReactionsList` and the rest - is absent from the source
+   and a test fails if any name appears (`SPEC-LIM-006`).
+4. `entity_cache_limit=500` caps what the session file accumulates
+   (`SPEC-SEC-008`), down from Telethon's default of 5000.
+
+**If it happens.** The rows are text and ids, not access hashes, so the archive
+alone cannot address anyone. Deleting a group's history removes them:
+`DELETE FROM dialogs WHERE chat_id = <id>` cascades to `messages`.
+
 ## Rules
 
 1. Never commit `.env` or any `*.session` file. `.gitignore` exists before they do.

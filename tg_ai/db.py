@@ -31,15 +31,36 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (chat_id, message_id) DO NOTHING
 """
 
+# For a Group or Channel the title is stored in first_name. That keeps
+# display_name, the Dialog Lookup and every rendered search hit working with no
+# second code path, at the cost of one column meaning "title" for two of the
+# three Peer Types - which is why peer_type sits next to it.
 _UPSERT_DIALOG_SQL = """
-INSERT INTO dialogs (chat_id, username, first_name, last_name, phone, is_contact)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO dialogs (chat_id, username, first_name, last_name, phone, is_contact, peer_type)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (chat_id) DO UPDATE SET
     username   = EXCLUDED.username,
     first_name = EXCLUDED.first_name,
     last_name  = EXCLUDED.last_name,
     phone      = EXCLUDED.phone,
-    is_contact = EXCLUDED.is_contact
+    is_contact = EXCLUDED.is_contact,
+    peer_type  = EXCLUDED.peer_type
+"""
+
+_SELECT_PEER_TYPE_SQL = """
+SELECT peer_type FROM dialogs WHERE chat_id = $1
+"""
+
+_UPSERT_PEER_SNAPSHOT_SQL = """
+INSERT INTO peer_snapshot (peer_id, peer_type, username, title, is_member, can_post, seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+ON CONFLICT (peer_id) DO UPDATE SET
+    peer_type = EXCLUDED.peer_type,
+    username  = EXCLUDED.username,
+    title     = EXCLUDED.title,
+    is_member = EXCLUDED.is_member,
+    can_post  = EXCLUDED.can_post,
+    seen_at   = now()
 """
 
 _ADVANCE_CURSOR_SQL = """
@@ -99,11 +120,24 @@ async def upsert_dialog(
     last_name: str | None,
     phone: str | None,
     is_contact: bool,
+    peer_type: str = "user",
 ) -> None:
-    """Insert or refresh the metadata of one dialog."""
+    """Insert or refresh the metadata of one Dialog.
+
+    Args:
+        peer_type: ``user``, ``group`` or ``channel``. Defaults to ``user`` so
+            every existing call site keeps its meaning.
+    """
     async with pool.acquire() as conn:
         await conn.execute(
-            _UPSERT_DIALOG_SQL, chat_id, username, first_name, last_name, phone, is_contact
+            _UPSERT_DIALOG_SQL,
+            chat_id,
+            username,
+            first_name,
+            last_name,
+            phone,
+            is_contact,
+            peer_type,
         )
 
 
@@ -129,6 +163,39 @@ async def advance_cursor(pool: asyncpg.Pool, chat_id: int, message_id: int) -> N
     """Move a dialog's resume cursor forward. Never moves it backwards."""
     async with pool.acquire() as conn:
         await conn.execute(_ADVANCE_CURSOR_SQL, chat_id, message_id)
+
+
+async def get_peer_type(pool: asyncpg.Pool, chat_id: int) -> str | None:
+    """The stored Peer Type of an archived Dialog, or ``None`` if unknown.
+
+    Read by the persona tools, which are meaningless for a Group or Channel
+    (`SPEC-PSN-009`).
+    """
+    async with pool.acquire() as conn:
+        return await conn.fetchval(_SELECT_PEER_TYPE_SQL, chat_id)
+
+
+async def record_peer_snapshot(
+    pool: asyncpg.Pool,
+    *,
+    peer_id: int,
+    peer_type: str,
+    username: str | None,
+    title: str | None,
+    is_member: bool,
+    can_post: bool,
+) -> None:
+    """Persist membership evidence derived from ``GetDialogs``."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            _UPSERT_PEER_SNAPSHOT_SQL,
+            peer_id,
+            peer_type,
+            username,
+            title,
+            is_member,
+            can_post,
+        )
 
 
 async def get_cursor(pool: asyncpg.Pool, chat_id: int) -> int:
@@ -351,6 +418,7 @@ SELECT d.chat_id, d.username,
   FROM dialogs d
   LEFT JOIN messages m        ON m.chat_id = d.chat_id
   LEFT JOIN dialog_personas p ON p.chat_id = d.chat_id
+ WHERE d.peer_type = 'user'
  GROUP BY d.chat_id, d.username, d.first_name, d.last_name, p.chat_id
  ORDER BY outgoing_count DESC, message_count DESC, d.chat_id
  LIMIT $1
@@ -838,3 +906,32 @@ class PostgresContactStore:
     async def save_contacts(self, saved_count: int, contact_ids: set[int]) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(_UPSERT_CONTACTS_CACHE_SQL, saved_count, sorted(contact_ids))
+
+
+# A user id that has written in a Group but has no Dialog of its own. Telegram
+# delivered it as a `min` constructor, so its access_hash cannot address it -
+# and assembling a contact list this way is the scraping that
+# channels.getParticipants is banned for, one message at a time (SPEC-SND-008).
+_GROUP_ONLY_SENDER_SQL = """
+SELECT EXISTS (
+           SELECT 1
+             FROM messages m
+             JOIN dialogs  d ON d.chat_id = m.chat_id
+            WHERE m.sender_id = $1
+              AND d.peer_type <> 'user'
+       )
+   AND NOT EXISTS (
+           SELECT 1 FROM dialogs WHERE chat_id = $1
+       )
+"""
+
+
+async def is_group_only_sender(pool: asyncpg.Pool, user_id: int) -> bool:
+    """Whether this id is known *only* from writing inside a Group or Channel.
+
+    True means the account has never had a Dialog with them and has only ever
+    seen them in a group. Such a Peer must never be a send target
+    (`SPEC-SND-008`).
+    """
+    async with pool.acquire() as conn:
+        return bool(await conn.fetchval(_GROUP_ONLY_SENDER_SQL, user_id))

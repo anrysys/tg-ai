@@ -87,21 +87,30 @@ def clone_session(config: Config) -> Path:
     return config.sync_session_path
 
 
-def display_name(user: User) -> str:
-    """Human-readable label for a user, never empty."""
-    parts = [p for p in (user.first_name, user.last_name) if p]
+def display_name(peer: object) -> str:
+    """Human-readable label for any Peer, never empty."""
+    title = getattr(peer, "title", None)
+    if title:
+        return title
+    parts = [
+        part
+        for part in (getattr(peer, "first_name", None), getattr(peer, "last_name", None))
+        if part
+    ]
     if parts:
         return " ".join(parts)
-    if user.username:
-        return f"@{user.username}"
-    return f"id:{user.id}"
+    username = getattr(peer, "username", None)
+    if username:
+        return f"@{username}"
+    return f"id:{peer.id}"
 
 
-def peer_label(user: User) -> str:
+def peer_label(peer: object) -> str:
     """Label including the username when one exists."""
-    name = display_name(user)
-    if user.username and not name.startswith("@"):
-        return f"{name} (@{user.username})"
+    name = display_name(peer)
+    username = getattr(peer, "username", None)
+    if username and not name.startswith("@"):
+        return f"{name} (@{username})"
     return name
 
 
@@ -257,23 +266,32 @@ def _digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
-def peer_match_keys(user: User) -> set[str]:
+def peer_match_keys(peer: object) -> set[str]:
     """Every string a Target may legitimately use to name this Peer.
 
-    Covers the numeric id, the username, the phone number reduced to digits,
-    and the first, last and full name. Names are case-folded and their internal
-    whitespace collapsed, so ``"anna  petrova"`` matches ``"Anna Petrova"``.
+    For a User: the numeric id, the username, the phone reduced to digits, and
+    the first, last and full name. For a Group or Channel: the id, the username
+    and the title. Fields are read with ``getattr`` because the three Peer
+    Types genuinely do not share a shape - a ``Channel`` has a ``title`` and no
+    ``phone``, and reading one off the other is how this broke the first time.
+
+    Names are case-folded and their internal whitespace collapsed, so
+    ``"anna  petrova"`` matches ``"Anna Petrova"``.
     """
-    keys: set[str] = {str(user.id)}
+    keys: set[str] = {str(peer.id)}
 
-    if user.username:
-        keys.add(user.username.casefold())
-    if user.phone:
-        keys.add(_digits(user.phone))
+    username = getattr(peer, "username", None)
+    if username:
+        keys.add(username.casefold())
 
-    first = (user.first_name or "").strip()
-    last = (user.last_name or "").strip()
-    for name in (first, last, f"{first} {last}".strip()):
+    phone = getattr(peer, "phone", None)
+    if phone:
+        keys.add(_digits(phone))
+
+    first = (getattr(peer, "first_name", None) or "").strip()
+    last = (getattr(peer, "last_name", None) or "").strip()
+    title = (getattr(peer, "title", None) or "").strip()
+    for name in (first, last, f"{first} {last}".strip(), title):
         if name:
             keys.add(" ".join(name.split()).casefold())
 
@@ -297,15 +315,15 @@ def target_keys(target: str) -> set[str]:
     return keys
 
 
-def matches_target(user: User, target: str) -> bool:
-    """Whether ``user`` is the Peer named by ``target`` (SPEC-SYNC-006).
+def matches_target(peer: object, target: str) -> bool:
+    """Whether ``peer`` is the Peer named by ``target`` (SPEC-SYNC-006).
 
     Matching is exact per key, never a substring: ``"an"`` must not silently
     pull in ``Anna``, ``Ivan`` and ``Alexander`` when the user asked for one
     person. A target that matches nothing is reported by the caller rather
     than being widened here.
     """
-    return bool(peer_match_keys(user) & target_keys(target))
+    return bool(peer_match_keys(peer) & target_keys(target))
 
 
 class ContactStore(Protocol):
@@ -425,14 +443,43 @@ class PeerIndex:
         """Return a known Peer for ``target``, or ``None`` if unknown.
 
         A hit is proof of membership: everything here came from GetDialogs.
+
+        Ids and usernames resolve through the maps. Groups and Channels also
+        have to resolve by **title**, because that is what they are called -
+        "golka.chat" is a title whose username is "golka_chat", and a user
+        naming a group will use the name they see. That falls back to a scan of
+        the bounded snapshot, which is at most a couple of hundred entries.
+
+        Raises:
+            ToolError: More than one Peer matches. Ambiguity is reported with
+                every candidate rather than resolved by guessing, exactly as
+                the Dialog Lookup does (`SPEC-SRCH-006`).
         """
         key = normalise_target(target)
         if not key:
             return None
         await self.refresh()
+
         if key.isdigit():
-            return self._by_id.get(int(key))
-        return self._by_username.get(key.lower())
+            hit = self._by_id.get(int(key))
+            if hit is not None:
+                return hit
+
+        hit = self._by_username.get(key.lower())
+        if hit is not None:
+            return hit
+
+        matches = [record.entity for record in self._dialogs if matches_target(record.entity, key)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            names = ", ".join(peer_label(match) for match in matches)
+            raise ToolError(
+                f"{target!r} matches {len(matches)} of your chats: {names}. "
+                "Nothing was requested from Telegram. Name one of them exactly, "
+                "or use its @username or numeric id."
+            )
+        return None
 
     async def contact_ids(self, *, force: bool = False) -> set[int]:
         """User ids in the account's contact list, cached."""
