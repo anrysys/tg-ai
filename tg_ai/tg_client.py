@@ -14,7 +14,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,7 +25,8 @@ from zoneinfo import ZoneInfo
 
 from telethon import TelegramClient, errors
 from telethon.tl.functions.contacts import GetContactsRequest
-from telethon.tl.types import User
+from telethon.tl.types import Channel, Chat, User
+from telethon.tl.types.contacts import ContactsNotModified
 
 from tg_ai.config import Config
 from tg_ai.safety import (
@@ -48,7 +49,15 @@ from tg_ai.safety import (
 log = logging.getLogger(__name__)
 
 #: How long a cached dialog index or contact set stays fresh, in seconds.
-CACHE_TTL_SECONDS = 300
+#: Raised from 300 with group support: GetDialogs is the heaviest call this
+#: codebase makes and a monitored endpoint, and the dialog list only gets
+#: longer once groups and channels are in it. Never lower this (SPEC-RCV-005).
+CACHE_TTL_SECONDS = 600
+
+#: The most dialogs any single GetDialogs walk will examine. Telethon pages
+#: this 100 at a time, so an unbounded walk on a busy account is several RPCs
+#: per refresh - and the previous code did exactly that, every 300 seconds.
+DIALOG_SCAN_LIMIT = 200
 
 
 def secure_session_file(path: Path) -> None:
@@ -96,20 +105,146 @@ def peer_label(user: User) -> str:
     return name
 
 
-def is_archivable(entity: object, *, include_bots: bool) -> bool:
+#: The Peer Types this project understands, as stored in `dialogs.peer_type`.
+PEER_TYPE_USER = "user"
+PEER_TYPE_GROUP = "group"
+PEER_TYPE_CHANNEL = "channel"
+
+
+def peer_type(entity: object) -> str | None:
+    """Classify a Telegram entity, or ``None`` if this project cannot use it.
+
+    A megagroup is a Group, because that is what it is to the person in it: a
+    place where many people talk. A gigagroup is classified as a Channel
+    despite its ``megagroup`` flag, because ordinary members cannot write in
+    one - and being able to write is the distinction that matters everywhere
+    this value is used (`SPEC-SND-001`).
+    """
+    if isinstance(entity, User):
+        return PEER_TYPE_USER
+    if isinstance(entity, Chat):
+        return PEER_TYPE_GROUP
+    if isinstance(entity, Channel):
+        if getattr(entity, "gigagroup", False):
+            return PEER_TYPE_CHANNEL
+        if entity.megagroup:
+            return PEER_TYPE_GROUP
+        if entity.broadcast:
+            return PEER_TYPE_CHANNEL
+    return None
+
+
+def is_member(entity: object) -> bool:
+    """Whether the account is currently in this Group or Channel.
+
+    Read from the cached entity, never from a fresh API call: asking Telegram
+    "am I in this?" for something we are not in is itself the cold lookup the
+    Peer Index exists to avoid.
+    """
+    if isinstance(entity, User):
+        return True
+    if getattr(entity, "left", False):
+        return False
+    if getattr(entity, "deactivated", False):
+        return False
+    # A migrated Chat is a husk: its history moved to a Channel, and writing to
+    # it does nothing useful.
+    return getattr(entity, "migrated_to", None) is None
+
+
+def can_post(entity: object) -> bool:
+    """Whether the account may write here (SPEC-SND-001).
+
+    For a Channel this is ``admin_rights.post_messages`` and nothing else: a
+    plain subscriber cannot post, and finding that out by trying is a wasted
+    request against a monitored endpoint.
+    """
+    kind = peer_type(entity)
+    if kind == PEER_TYPE_USER:
+        return True
+    if not is_member(entity):
+        return False
+    if kind == PEER_TYPE_GROUP:
+        banned = getattr(entity, "default_banned_rights", None)
+        if banned is not None and getattr(banned, "send_messages", False):
+            rights = getattr(entity, "admin_rights", None)
+            return bool(rights is not None)
+        return True
+    if kind == PEER_TYPE_CHANNEL:
+        rights = getattr(entity, "admin_rights", None)
+        return bool(rights is not None and getattr(rights, "post_messages", False))
+    return False
+
+
+def is_archivable(entity: object, *, include_bots: bool, include_groups: bool = False) -> bool:
     """Whether a dialog peer belongs in the archive (SPEC-SYNC-001).
 
-    Only 1-on-1 chats with real people: groups, channels and - unless opted
-    in - bots are out of scope. Deleted accounts carry no useful history.
+    ``include_groups`` defaults to ``False`` so that a full sync stays what it
+    has always been: 1-on-1 chats with real people. Groups and channels are
+    opt-in and reachable only through ``--targets`` (`SPEC-SYNC-007`), because
+    they would otherwise dominate the archive by volume and turn every routine
+    sync into a large read against monitored endpoints.
     """
-    if not isinstance(entity, User):
+    kind = peer_type(entity)
+    if kind is None:
         return False
-    if entity.deleted:
-        return False
-    if entity.bot and not include_bots:
-        return False
-    # 777000 is Telegram's own service account; its messages are login codes.
-    return entity.id != 777000
+
+    if kind == PEER_TYPE_USER:
+        if entity.deleted:
+            return False
+        if entity.bot and not include_bots:
+            return False
+        # 777000 is Telegram's own service account; its messages are login codes.
+        return entity.id != 777000
+
+    return include_groups and is_member(entity)
+
+
+_HASH_MASK = (1 << 64) - 1
+
+
+def contacts_hash(saved_count: int, contact_ids: Iterable[int]) -> int:
+    """The documented ``contacts.getContacts`` hash for a known contact set.
+
+    Sending it lets the server answer ``contactsContactsNotModified`` instead of
+    re-serialising every contact, which is what official clients do and what
+    this project previously never did - passing ``hash=0`` forever is both
+    wasteful and a behavioural difference visible server-side (`SPEC-SND-006`).
+
+    Two details here are easy to get wrong and were both found by testing
+    against the live API rather than by reading:
+
+    - The value folded in first is ``saved_count`` from the previous response,
+      **not** the number of users returned. They differ on a real account -
+      502 users against a ``saved_count`` of 372 on the account this was built
+      for - and using the wrong one silently produces a hash that never
+      matches, so the optimisation does nothing and nobody notices.
+    - The field is a **signed** 64-bit integer on the wire. Returning the
+      unsigned accumulator makes Telethon raise ``struct.error`` for roughly
+      half of all inputs.
+
+    See <https://core.telegram.org/api/offsets#hash-generation>.
+
+    Args:
+        saved_count: ``saved_count`` from the previous ``contacts.contacts``.
+        contact_ids: The contact ids that response carried.
+
+    Returns:
+        A signed 64-bit hash, or ``0`` when nothing is cached - which is the
+        documented "I have nothing" value.
+    """
+    ids = sorted(contact_ids)
+    if not ids:
+        return 0
+
+    value = 0
+    for number in [saved_count, *ids]:
+        value = (value ^ (value >> 21)) & _HASH_MASK
+        value = (value ^ (value << 35)) & _HASH_MASK
+        value = (value ^ (value >> 4)) & _HASH_MASK
+        value = (value + number) & _HASH_MASK
+
+    return value - (1 << 64) if value >= (1 << 63) else value
 
 
 def normalise_target(target: str) -> str:
@@ -173,48 +308,124 @@ def matches_target(user: User, target: str) -> bool:
     return bool(peer_match_keys(user) & target_keys(target))
 
 
+class ContactStore(Protocol):
+    """Where the contact-list cache survives a process restart.
+
+    Same shape as :class:`RpcLedger`, and for the same reason: an MCP stdio
+    server is respawned constantly, so anything it holds in memory is not a
+    cache, it is a warm-up cost paid on every launch.
+    """
+
+    async def load_contacts(self) -> tuple[set[int], int] | None: ...
+
+    async def save_contacts(self, saved_count: int, contact_ids: set[int]) -> None: ...
+
+
 @dataclass(slots=True)
 class _Cached:
     value: object
     fetched_at: float
 
 
-class PeerIndex:
-    """A short-lived index of peers the account already has dialogs with.
+@dataclass(frozen=True, slots=True)
+class DialogRecord:
+    """One row of the shared dialog snapshot.
 
-    Resolving through this index costs one ``GetDialogs`` call per five
-    minutes instead of one ``ResolveUsername`` per lookup, and it is the
-    mechanism behind the "do we know this person?" send guard.
+    Exists so that the Peer Index and ``tg_get_unread_dialogs`` can share a
+    single GetDialogs walk. Two independent walks per user question is
+    indefensible against a monitored endpoint (SPEC-RCV-005).
     """
 
-    def __init__(self, client: TelegramClient, ttl: float = CACHE_TTL_SECONDS) -> None:
+    entity: object
+    kind: str
+    unread_count: int
+    date: object
+    preview: str | None
+
+
+class PeerIndex:
+    """A cache of the Peers the account already has Dialogs with.
+
+    Resolving through this index costs one ``GetDialogs`` walk per TTL instead
+    of one ``ResolveUsername`` per lookup, and it is the mechanism behind both
+    the "do we know this person?" send guard and the "are we a member of this
+    group?" check. Membership evidence, not a convenience.
+    """
+
+    def __init__(
+        self,
+        client: TelegramClient,
+        ttl: float = CACHE_TTL_SECONDS,
+        *,
+        store: ContactStore | None = None,
+    ) -> None:
         self._client = client
         self._ttl = ttl
-        self._by_username: dict[str, User] = {}
-        self._by_id: dict[int, User] = {}
+        self._store = store
+        self._by_username: dict[str, object] = {}
+        self._by_id: dict[int, object] = {}
+        self._dialogs: list[DialogRecord] = []
         self._dialogs_at = 0.0
         self._contacts: _Cached | None = None
 
     async def refresh(self, *, force: bool = False) -> None:
-        """Rebuild the dialog index if it has expired."""
+        """Rebuild the dialog index if it has expired.
+
+        Bounded by ``DIALOG_SCAN_LIMIT``: an unbounded walk is several RPCs on
+        a busy account, and this runs on a timer.
+        """
         if not force and (time.monotonic() - self._dialogs_at) < self._ttl:
             return
-        by_username: dict[str, User] = {}
-        by_id: dict[int, User] = {}
-        async for dialog in self._client.iter_dialogs():
+
+        by_username: dict[str, object] = {}
+        by_id: dict[int, object] = {}
+        records: list[DialogRecord] = []
+
+        async for dialog in self._client.iter_dialogs(limit=DIALOG_SCAN_LIMIT):
             entity = dialog.entity
-            if not isinstance(entity, User):
+            kind = peer_type(entity)
+            if kind is None:
                 continue
+            # Only Peers the account is actually party to. A left group in the
+            # dialog list is history, not membership.
+            if not is_member(entity):
+                continue
+
             by_id[entity.id] = entity
-            if entity.username:
-                by_username[entity.username.lower()] = entity
+            username = getattr(entity, "username", None)
+            if username:
+                by_username[username.lower()] = entity
+
+            records.append(
+                DialogRecord(
+                    entity=entity,
+                    kind=kind,
+                    unread_count=dialog.unread_count,
+                    date=dialog.date,
+                    preview=dialog.message.message if dialog.message else None,
+                )
+            )
+
         self._by_username = by_username
         self._by_id = by_id
+        self._dialogs = records
         self._dialogs_at = time.monotonic()
-        log.info("peer index refreshed: %d private dialogs", len(by_id))
+        log.info(
+            "peer index refreshed: %d dialogs (%d private)",
+            len(by_id),
+            sum(1 for record in records if record.kind == PEER_TYPE_USER),
+        )
 
-    async def lookup(self, target: str) -> User | None:
-        """Return a known peer for ``target``, or ``None`` if unknown."""
+    async def dialogs(self) -> list[DialogRecord]:
+        """The shared dialog snapshot, refreshed if stale."""
+        await self.refresh()
+        return self._dialogs
+
+    async def lookup(self, target: str) -> object | None:
+        """Return a known Peer for ``target``, or ``None`` if unknown.
+
+        A hit is proof of membership: everything here came from GetDialogs.
+        """
         key = normalise_target(target)
         if not key:
             return None
@@ -233,9 +444,28 @@ class PeerIndex:
         if fresh and self._contacts is not None:
             return self._contacts.value  # type: ignore[return-value]
 
-        result = await self._client(GetContactsRequest(hash=0))
-        ids = {user.id for user in getattr(result, "users", [])}
-        self._contacts = _Cached(value=ids, fetched_at=time.monotonic())
+        known: set[int] = set()
+        saved_count = 0
+        if self._contacts is not None:
+            known, saved_count = self._contacts.value  # type: ignore[assignment]
+        elif self._store is not None:
+            # Restored across a process restart. The MCP server is respawned
+            # constantly, so without this the hash is 0 on every launch and the
+            # whole contact list comes back down every time.
+            restored = await self._store.load_contacts()
+            if restored is not None:
+                known, saved_count = restored
+
+        result = await self._client(GetContactsRequest(hash=contacts_hash(saved_count, known)))
+        if isinstance(result, ContactsNotModified):
+            ids = known
+        else:
+            ids = {user.id for user in getattr(result, "users", [])}
+            saved_count = int(getattr(result, "saved_count", 0) or 0)
+            if self._store is not None:
+                await self._store.save_contacts(saved_count, ids)
+
+        self._contacts = _Cached(value=(ids, saved_count), fetched_at=time.monotonic())
         return ids
 
     def invalidate(self) -> None:
@@ -244,20 +474,46 @@ class PeerIndex:
         self._contacts = None
 
 
-async def resolve_peer(client: TelegramClient, index: PeerIndex, target: str) -> tuple[User, bool]:
-    """Resolve ``target`` to a user, preferring locally known peers.
+async def resolve_peer(
+    client: TelegramClient,
+    index: PeerIndex,
+    target: str,
+    *,
+    allow: tuple[str, ...] = (PEER_TYPE_USER,),
+) -> tuple[object, bool]:
+    """Resolve ``target`` to a Peer, preferring locally known ones.
+
+    **The guard lives here rather than at each call site**, so `--dialog` and
+    every present and future MCP tool inherit it and a new caller cannot
+    forget it (`SPEC-SND-006`).
+
+    Cold resolution - ``contacts.ResolveUsername`` for a handle the account has
+    no Dialog with - is permitted **only** when the caller will accept nothing
+    but a ``User``. That is the structural rule: a caller that admits Groups or
+    Channels gets no cold path at all, so it is impossible to reach
+    ``@some_public_channel`` this way. Resolving a channel the account has
+    never joined is textbook scraper behaviour, and doing it once per target
+    is how a script is identified as one.
+
+    Groups and Channels therefore come from the Peer Index or not at all, and a
+    Peer Index hit is itself the proof of membership: everything in it came
+    from ``GetDialogs``.
 
     Args:
-        target: ``@username``, a bare username, a numeric id, a phone number
-            in international format, or ``me``/``self`` for Saved Messages.
+        target: ``@username``, a bare username, a numeric id, a phone number in
+            international format, or ``me``/``self`` for Saved Messages.
+        allow: Peer Types this caller can handle. The default keeps every
+            existing call site user-only, including ``sync_db.py --dialog``.
 
     Returns:
-        ``(user, known_locally)``. ``known_locally`` is ``True`` when the peer
-        came from the existing dialog index, which means no cold resolution
-        call was made.
+        ``(peer, known_locally)``. ``known_locally`` is ``True`` when the Peer
+        came from the Peer Index, which means no cold resolution happened and
+        that the account is a member.
 
     Raises:
-        ToolError: The target is empty or cannot be resolved.
+        ToolError: The target is empty, is of a type this caller cannot handle,
+            or is a Group or Channel the account is not a member of - in which
+            case **no API call is made**.
     """
     key = normalise_target(target)
     if not key:
@@ -268,12 +524,42 @@ async def resolve_peer(client: TelegramClient, index: PeerIndex, target: str) ->
 
     known = await index.lookup(key)
     if known is not None:
+        kind = peer_type(known)
+        if kind not in allow:
+            raise ToolError(_wrong_type_message(target, kind, allow))
         return known, True
 
+    # Not in the index. Whether we may ask Telegram at all depends entirely on
+    # what the caller is willing to accept.
+    if tuple(allow) != (PEER_TYPE_USER,):
+        raise ToolError(
+            f"{target!r} is not among the Groups, Channels and chats this "
+            "account is part of. Nothing was requested from Telegram. Groups "
+            "and channels are reachable only when you are already a member - "
+            "this server never looks up or joins one you have not joined, "
+            "because resolving unknown channels is what gets personal accounts "
+            "flagged as scrapers. Join it in the Telegram app first, then retry."
+        )
+
     entity = await client.get_entity(key)
-    if not isinstance(entity, User):
-        raise ToolError(f"{target!r} is a group or channel. This server only handles 1-on-1 chats.")
+    if peer_type(entity) != PEER_TYPE_USER:
+        # Reached only for a user-only caller that resolved something else.
+        # Refused and, deliberately, never added to the Peer Index.
+        raise ToolError(
+            f"{target!r} is a group or channel. This lookup path handles people "
+            "only. Groups and channels are reached through the dialog list, and "
+            "only when you are already a member."
+        )
     return entity, False
+
+
+def _wrong_type_message(target: str, kind: str | None, allow: tuple[str, ...]) -> str:
+    """Explain a Peer Type refusal in terms of what the caller can do."""
+    wanted = " or ".join(allow)
+    return (
+        f"{target!r} is a {kind}, and this operation accepts a {wanted}. "
+        "Nothing was requested from Telegram."
+    )
 
 
 async def has_conversation(client: TelegramClient, user: User) -> bool:

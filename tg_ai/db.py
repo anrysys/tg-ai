@@ -802,3 +802,39 @@ async def record_client_identity(
         return None
     previous = dict(row)
     return previous if previous != current else None
+
+
+_SELECT_CONTACTS_CACHE_SQL = """
+SELECT saved_count, contact_ids FROM contacts_cache WHERE id = 1
+"""
+
+_UPSERT_CONTACTS_CACHE_SQL = """
+INSERT INTO contacts_cache (id, saved_count, contact_ids) VALUES (1, $1, $2)
+ON CONFLICT (id) DO UPDATE SET
+    saved_count  = EXCLUDED.saved_count,
+    contact_ids  = EXCLUDED.contact_ids,
+    refreshed_at = now()
+"""
+
+
+class PostgresContactStore:
+    """Persists the contact-list cache so the hash survives a restart.
+
+    Without this the MCP server sends ``hash=0`` on every launch and Telegram
+    re-sends the whole contact list, which is the waste `SPEC-SND-006` is
+    about. Satisfies `tg_client.ContactStore` structurally.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def load_contacts(self) -> tuple[set[int], int] | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(_SELECT_CONTACTS_CACHE_SQL)
+        if row is None:
+            return None
+        return set(row["contact_ids"]), int(row["saved_count"])
+
+    async def save_contacts(self, saved_count: int, contact_ids: set[int]) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(_UPSERT_CONTACTS_CACHE_SQL, saved_count, sorted(contact_ids))

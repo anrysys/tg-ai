@@ -12,6 +12,10 @@ from tg_ai.config import SCHEMA_PATH
 
 SCHEMA = SCHEMA_PATH.read_text(encoding="utf-8")
 
+#: The schema with `--` comment lines removed. The file explains itself at
+#: length, and prose that quotes DDL would otherwise be counted as DDL.
+STATEMENTS = "\n".join(line for line in SCHEMA.splitlines() if not line.lstrip().startswith("--"))
+
 BUDGET_STATEMENTS = (
     db._RPC_COUNTS_SQL,
     db._COUNT_CALLS_SQL,
@@ -91,9 +95,44 @@ def test_every_rolling_window_column_is_indexed():
 def test_the_safety_tables_exist_and_stay_idempotent():
     for table in ("api_call_log", "api_flood_log", "api_kill_switch", "client_identity"):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in SCHEMA
-    # The whole file is re-executed on every start by db.ensure_schema.
-    assert SCHEMA.count("CREATE TABLE ") == SCHEMA.count("CREATE TABLE IF NOT EXISTS ")
-    assert SCHEMA.count("CREATE INDEX ") == SCHEMA.count("CREATE INDEX IF NOT EXISTS ")
+    # The whole file is re-executed on every start by db.ensure_schema, so
+    # every statement in it has to tolerate already having been applied.
+    assert STATEMENTS.count("CREATE TABLE ") == STATEMENTS.count("CREATE TABLE IF NOT EXISTS ")
+    assert STATEMENTS.count("CREATE INDEX ") == STATEMENTS.count("CREATE INDEX IF NOT EXISTS ")
+
+
+def test_every_alter_is_idempotent_too():
+    # Postgres has no ADD CONSTRAINT IF NOT EXISTS, so a constraint has to be
+    # wrapped in a DO block that swallows duplicate_object. Without that, the
+    # second `just db-schema` on an existing archive fails.
+    for line in STATEMENTS.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("ALTER TABLE"):
+            continue
+        assert "ADD COLUMN IF NOT EXISTS" in stripped or "ADD CONSTRAINT" in stripped
+    if "ADD CONSTRAINT" in STATEMENTS:
+        assert "WHEN duplicate_object THEN NULL" in STATEMENTS
+
+
+def test_the_peer_type_column_is_added_by_alter_not_by_the_create():
+    # A column added inside CREATE TABLE IF NOT EXISTS silently never appears
+    # on an archive that already exists, and this file has no migration runner.
+    assert "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS peer_type" in STATEMENTS
+    create = STATEMENTS[STATEMENTS.index("CREATE TABLE IF NOT EXISTS dialogs") :]
+    create = create[: create.index(");")]
+    assert "peer_type" not in create
+
+
+def test_peer_type_is_constrained_to_the_three_known_kinds():
+    assert "peer_type IN ('user', 'group', 'channel')" in STATEMENTS
+
+
+def test_sender_id_carries_the_warning_that_it_is_not_a_peer():
+    # The next person to read this schema will otherwise assume it is a foreign
+    # key to a resolvable person, which is exactly the mistake SPEC-SND-008
+    # exists to prevent.
+    assert "COMMENT ON COLUMN messages.sender_id" in STATEMENTS
+    assert "never a send target" in STATEMENTS
 
 
 def test_the_kill_switch_allows_an_indefinite_trip():

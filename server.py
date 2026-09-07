@@ -160,7 +160,10 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
             timezone=cfg.timezone,
         )
         _client = build_client(cfg, guard=_guard)
-        _index = PeerIndex(_client)
+        # The contact cache is persisted for the same reason the budget is:
+        # without it the server sends hash=0 on every launch and Telegram
+        # re-sends the whole contact list each time (SPEC-SND-006).
+        _index = PeerIndex(_client, store=db.PostgresContactStore(await database()))
 
     if not _client.is_connected():
         # One connection per authorization key. The sync clone shares this

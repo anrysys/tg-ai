@@ -300,7 +300,7 @@ async def run(args: argparse.Namespace, config: Config) -> int:
         me = await client.get_me()
         log.info("Syncing history for %s", peer_label(me))
 
-        index = PeerIndex(client)
+        index = PeerIndex(client, store=db.PostgresContactStore(pool))
         targets = await collect_targets(client, index, config, args.dialog, args.targets)
         if args.targets and not targets:
             log.error("None of the requested targets has a private dialog. Nothing to sync.")

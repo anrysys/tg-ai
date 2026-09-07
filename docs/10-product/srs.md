@@ -3,7 +3,7 @@ id: DOC-SRS
 title: Software requirements specification
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-PRD, DOC-SAD, DOC-MCP-TOOLS, DOC-QA, DOC-SECURITY]
 ---
 
@@ -108,16 +108,34 @@ still reach the agent, and the number of chunks already delivered MUST be logged
 **Test.** Manual; `server.tg_send_message` logs `partial send to %s: %d/%d`
 before re-raising into `guarded_tool`.
 
-### SPEC-SND-006 - Cold resolution is a last resort
+### SPEC-SND-006 - Cold resolution is a last resort, and never for a Group
 
 **Requirement.** Resolving a Target MUST consult the Peer Index before calling
 Telegram's username-resolution API.
 
+A Group or Channel MUST be returned **only** when it came from the Peer Index.
+When it is absent, `resolve_peer` MUST raise without making any API call, and
+MUST NOT fall through to `client.get_entity()`.
+
+The rule is structural: cold resolution is permitted **only** for a caller that
+will accept nothing but a `User`. A caller that admits a Group or Channel has no
+cold path at all. The guard lives inside `resolve_peer`, not at its call sites,
+so `sync_db.py --dialog` and every present and future tool inherit it and a new
+caller cannot forget it. As a consequence `--dialog` remains user-only, and
+Groups and Channels are reachable through `--targets` and nothing else.
+
 **Rationale.** `ResolveUsername` for unknown handles is itself rate-limited and
-is one of the signals used to detect scripted accounts.
-**Decided by.** [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md).
-**Test.** `tg_client.resolve_peer` returns `(user, True)` from the index before
-any `get_entity` call; the index refreshes at most once per `CACHE_TTL_SECONDS`.
+is one of the signals used to detect scripted accounts. Doing it for a channel
+the account has never joined is the definitive scraper pattern - and rejecting
+the *result* is not enough, because the request has already been made. A Peer
+Index hit doubles as proof of membership, since everything in it came from
+`GetDialogs`.
+**Decided by.** [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md),
+extended by [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_group_rules.py` - in particular
+`test_a_channel_not_in_the_index_is_refused_without_any_api_call` and
+`test_a_caller_that_admits_groups_never_gets_a_cold_lookup`, both of which
+assert the client was never called.
 
 ---
 
@@ -248,17 +266,25 @@ entire archive.
 
 ## SYNC - Filling the archive
 
-### SPEC-SYNC-001 - Private human chats only
+### SPEC-SYNC-001 - A default sync archives people only
 
-**Requirement.** `sync_db.py` MUST archive only 1-on-1 Dialogs with `User`
-peers. It MUST exclude groups, channels, deleted accounts, and Telegram's
-service account `777000`. Bots are excluded unless `TG_SYNC_INCLUDE_BOTS` is
-true.
+**Requirement.** A sync with no Target Filter MUST archive only 1-on-1 Dialogs
+with `User` peers. It MUST exclude Groups and Channels, deleted accounts, and
+Telegram's service account `777000`. Bots are excluded unless
+`TG_SYNC_INCLUDE_BOTS` is true.
 
-**Rationale.** Groups and channels are out of scope and would dominate the
-Archive by volume. Account `777000` delivers login codes, and archiving
-one-time passwords in plain text is a security defect.
-**Test.** `tests/test_peer_rules.py`.
+Groups and Channels are **opt-in only**, through `--targets` (`SPEC-SYNC-007`).
+`is_archivable` MUST default to excluding them, so that widening it requires an
+explicit argument at the call site rather than being the ambient behaviour.
+
+**Rationale.** Groups and channels would dominate the Archive by volume, and
+pulling them on every routine sync turns a background task into a large,
+repeated read against monitored endpoints. Account `777000` delivers login
+codes, and archiving one-time passwords in plain text is a security defect.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_peer_rules.py` - in particular
+`test_a_full_sync_still_archives_people_only` and
+`test_groups_are_archivable_only_when_explicitly_included`.
 
 ### SPEC-SYNC-002 - Insertion is idempotent
 
