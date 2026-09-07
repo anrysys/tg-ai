@@ -8,92 +8,47 @@ therefore prefers peers the account already knows (SPEC-SND-001).
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import logging
 import os
 import shutil
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO
+from zoneinfo import ZoneInfo
 
-from telethon import TelegramClient
+from telethon import TelegramClient, errors
 from telethon.tl.functions.contacts import GetContactsRequest
 from telethon.tl.types import User
 
 from tg_ai.config import Config
-from tg_ai.safety import ToolError
+from tg_ai.safety import (
+    FLOOD_TRIP_WINDOW_SECONDS,
+    KILL_SWITCH_COOLDOWN_SECONDS,
+    MIN_RPC_GAP_SECONDS,
+    RPC_BUDGET_PER_DAY,
+    RPC_BUDGET_PER_HOUR,
+    RPC_SCOPE,
+    ToolError,
+    budget_message,
+    flood_trips_kill_switch,
+    in_quiet_window,
+    is_flood_error,
+    jittered,
+    kill_switch_message,
+    quiet_window_message,
+)
 
 log = logging.getLogger(__name__)
 
 #: How long a cached dialog index or contact set stays fresh, in seconds.
 CACHE_TTL_SECONDS = 300
-
-
-def build_client(config: Config, *, session_base: Path | None = None) -> TelegramClient:
-    """Create a Telethon client bound to a session file (SPEC-SEC-007, SPEC-SEC-008).
-
-    This is the only construction site in the project. ``auth.py``,
-    ``server.py`` and ``sync_db.py`` all come through here, which is what
-    makes the Client Identity below identical on every connection - the
-    property that actually matters, far more than the strings themselves
-    (ADR-0009).
-
-    Telethon's defaults are tuned for convenience, not for a personal account
-    under observation, so every parameter that matters is pinned explicitly
-    rather than inherited. Do not add a Telethon event handler anywhere in
-    this codebase: ``receive_updates=False`` means handlers silently never
-    fire, and re-enabling updates to "fix" that would subscribe the account to
-    every message in every group it belongs to (ADR-0009).
-
-    Args:
-        config: Validated configuration.
-        session_base: Session path without the ``.session`` suffix. Defaults
-            to the primary session; ``sync_db.py`` passes the clone.
-    """
-    base = session_base if session_base is not None else config.session_path
-    return TelegramClient(
-        str(base),
-        config.api_id,
-        config.api_hash,
-        # --- Client Identity -------------------------------------------
-        # Honest and stable, never impersonating an official client. Telegram
-        # already knows this client is unofficial because it knows the api_id.
-        device_model=config.device_model,
-        system_version=config.system_version,
-        app_version=config.app_version,
-        lang_code=config.lang_code,
-        system_lang_code=config.system_lang_code,
-        # --- The constructor contract ----------------------------------
-        # The zero here is load-bearing, not a placeholder. Telethon's default
-        # of 60 makes it sleep through - that is, silently retry - every flood
-        # wait of 60 seconds or less. Scraping-induced waits are typically
-        # 5-30 seconds, so with the default every one of them is invisible:
-        # the FloodWaitError handlers in this project would never fire, and
-        # AGENTS.md's rule against retrying a flood wait would be violated
-        # inside the library. Zero makes every wait surface as an exception,
-        # so it is counted, reported, and fed to the kill switch.
-        flood_sleep_threshold=0,
-        # No real-time push. The server reads on demand; with group support
-        # this would otherwise stream every message from every group.
-        receive_updates=False,
-        # Never enable. On connect it calls updates.getDifference, which is a
-        # bulk history fetch and the exact flood risk receive_updates=False
-        # exists to avoid.
-        catch_up=False,
-        # A failing request must not silently become five requests.
-        request_retries=1,
-        # Every reconnect replays initConnection, so a network blip must not
-        # produce a handshake burst.
-        connection_retries=2,
-        retry_delay=5,
-        auto_reconnect=True,
-        # Group history fills this cache with strangers' ids and access
-        # hashes, and the cache lives in the session file that clone_session()
-        # copies on every sync run. Cap it: this project has no business
-        # accumulating access hashes for people the user never spoke to.
-        entity_cache_limit=500,
-    )
 
 
 def secure_session_file(path: Path) -> None:
@@ -407,3 +362,320 @@ class SessionLock:
 
     def __exit__(self, *exc_info: object) -> None:
         self.release()
+
+
+class RpcLedger(Protocol):
+    """The persisted state the limiter needs (SPEC-LIM-002).
+
+    Declared here, next to its only consumer, rather than in ``safety`` - that
+    module is pure by contract and has no business naming an async I/O
+    interface. ``tg_ai.db.PostgresRpcLedger`` satisfies this structurally, so
+    no import crosses between ``db`` and ``tg_client``.
+    """
+
+    async def record_call(self, scope: str, key: str) -> None: ...
+
+    async def rpc_counts(self) -> tuple[int, int]: ...
+
+    async def record_flood(self, error_type: str, method: str, target: str | None) -> None: ...
+
+    async def count_floods(self, window_seconds: float) -> int: ...
+
+    async def active_kill_switch(self) -> tuple[datetime, str, datetime | None] | None: ...
+
+    async def trip_kill_switch(self, reason: str, expires_at: datetime | None) -> None: ...
+
+
+class RpcGuard:
+    """Serialises and rations every Telegram request (SPEC-LIM-001).
+
+    Deliberately a plain object rather than part of the client subclass:
+    constructing a ``TelegramClient`` needs credentials and touches a session
+    file, and the offline test suite must be able to exercise this logic
+    without either. The clock and the sleep are injected for the same reason.
+
+    All the *decisions* live in :mod:`tg_ai.safety` as pure functions over
+    numbers this class fetches. What is left here is the ordering, the lock and
+    the bookkeeping.
+    """
+
+    def __init__(
+        self,
+        ledger: RpcLedger,
+        *,
+        quiet_start: dt_time,
+        quiet_end: dt_time,
+        timezone: str,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._ledger = ledger
+        self._quiet_start = quiet_start
+        self._quiet_end = quiet_end
+        self._zone = ZoneInfo(timezone)
+        self._monotonic = monotonic
+        self._sleep = sleep
+        self._now = now if now is not None else lambda: datetime.now(UTC)
+        self._lock = asyncio.Lock()
+        self._owner: asyncio.Task | None = None
+        # -inf rather than 0 so the very first request is not made to wait for
+        # a gap that has, in every meaningful sense, already elapsed.
+        self._last_call = float("-inf")
+
+    @asynccontextmanager
+    async def reserve(self, method: str) -> AsyncIterator[None]:
+        """Authorise, serialise and pace one request.
+
+        Re-entrancy is not a nicety here, it is a correctness requirement.
+        Telethon's ``_call`` issues nested requests of its own: every request's
+        ``resolve()`` may call ``get_input_entity``, which calls
+        ``self(GetUsersRequest(...))``, and the migrate path calls
+        ``is_user_authorized`` which calls ``self(GetStateRequest())``. Those
+        run inside the outer call, in the same task, so a plain
+        ``asyncio.Lock`` held across the delegate deadlocks permanently and
+        without a traceback.
+
+        The owner is tracked as a task rather than a ``ContextVar`` on purpose:
+        a ContextVar is copied into child tasks at creation, which would wrongly
+        exempt Telethon's genuinely concurrent background work - the
+        auto-reconnect callback and the update loop - from the lock they must
+        queue behind.
+        """
+        nested = self._owner is not None and self._owner is asyncio.current_task()
+        await self._authorise(nested=nested)
+
+        if nested:
+            # Already inside an authorised call. Still a real request, so it is
+            # still paced and still counted - only the lock is skipped.
+            await self._pace()
+            await self._record(method)
+            yield
+            return
+
+        async with self._lock:
+            self._owner = asyncio.current_task()
+            try:
+                await self._pace()
+                await self._record(method)
+                yield
+            finally:
+                self._owner = None
+
+    async def headroom(self) -> tuple[int, int]:
+        """Requests left in the rolling hour and day. For ``tg_whoami``."""
+        hourly, daily = await self._ledger.rpc_counts()
+        return (
+            max(0, RPC_BUDGET_PER_HOUR - hourly),
+            max(0, RPC_BUDGET_PER_DAY - daily),
+        )
+
+    async def note_failure(
+        self, exc: BaseException, method: str, target: str | None = None
+    ) -> None:
+        """Record a flood and trip the kill switch when the rate warrants it.
+
+        A ``PeerFloodError`` trips it **indefinitely**: Telegram has flagged the
+        account for spam, which is an escalation rather than a cooldown, and
+        only the account owner should decide the account is healthy again.
+        """
+        if isinstance(exc, errors.PeerFloodError):
+            await self._ledger.record_flood(type(exc).__name__, method, target)
+            await self._ledger.trip_kill_switch(
+                f"PeerFloodError on {method} - Telegram flagged this account for spam",
+                None,
+            )
+            return
+
+        if not is_flood_error(exc):
+            return
+
+        await self._ledger.record_flood(type(exc).__name__, method, target)
+        recent = await self._ledger.count_floods(FLOOD_TRIP_WINDOW_SECONDS)
+        if flood_trips_kill_switch(recent):
+            await self._ledger.trip_kill_switch(
+                f"{recent} flood waits within an hour, most recently on {method}",
+                self._now() + timedelta(seconds=KILL_SWITCH_COOLDOWN_SECONDS),
+            )
+
+    # --- internals --------------------------------------------------------
+
+    async def _authorise(self, *, nested: bool) -> None:
+        """Raise ``ToolError`` when this request must not be made."""
+        try:
+            switch = await self._ledger.active_kill_switch()
+        except Exception as exc:
+            raise self._ledger_unreachable(exc) from exc
+
+        if switch is not None:
+            tripped_at, reason, expires_at = switch
+            message = kill_switch_message(
+                tripped_at=tripped_at, reason=reason, expires_at=expires_at, now=self._now()
+            )
+            # The kill switch stops nested requests too. It is the emergency
+            # brake: finishing an in-flight call is not worth more traffic from
+            # an account Telegram is already unhappy with.
+            if message is not None:
+                raise ToolError(message)
+
+        if nested:
+            # The outer call already cleared the quiet window and the budget.
+            # Failing a request halfway through, after its peer has been
+            # resolved, would be worse than the one extra RPC it costs.
+            return
+
+        local_now = self._now().astimezone(self._zone).time()
+        if in_quiet_window(local_now, self._quiet_start, self._quiet_end):
+            raise ToolError(quiet_window_message(self._quiet_start, self._quiet_end))
+
+        try:
+            hourly, daily = await self._ledger.rpc_counts()
+        except Exception as exc:
+            raise self._ledger_unreachable(exc) from exc
+
+        message = budget_message(hourly, daily)
+        if message is not None:
+            raise ToolError(message)
+
+    @staticmethod
+    def _ledger_unreachable(exc: BaseException) -> ToolError:
+        """Fail closed when the budget cannot be read.
+
+        A budget that evaporates when PostgreSQL stops is not a budget - the
+        cheapest way around it would be `docker stop`. Refusing costs the user
+        one command; guessing costs an account.
+        """
+        return ToolError(
+            "Cannot read the Telegram safety budget from PostgreSQL "
+            f"({type(exc).__name__}: {exc}). Refusing to contact Telegram "
+            "rather than proceeding unmetered. Start the database with "
+            "`just db-up` and retry."
+        )
+
+    async def _pace(self) -> None:
+        gap = jittered(MIN_RPC_GAP_SECONDS)
+        elapsed = self._monotonic() - self._last_call
+        if elapsed < gap:
+            await self._sleep(gap - elapsed)
+        self._last_call = self._monotonic()
+
+    async def _record(self, method: str) -> None:
+        try:
+            await self._ledger.record_call(RPC_SCOPE, method)
+        except Exception as exc:
+            raise self._ledger_unreachable(exc) from exc
+
+
+def request_name(request: object) -> str:
+    """A stable, loggable name for a Telethon request.
+
+    Kept greppable rather than clever: the budget is auditable only if the
+    ``key`` column says which method spent it.
+    """
+    if isinstance(request, list | tuple):
+        return ",".join(type(item).__name__ for item in request) or "UnknownRequest"
+    return type(request).__name__
+
+
+class GuardedClient(TelegramClient):
+    """A Telethon client whose every request goes through :class:`RpcGuard`.
+
+    Installed at the client level rather than at each call site, because a
+    control a new call site can forget is not a control. ``__call__`` is the
+    right seam: it is a one-line delegate to ``_call``, and the only path in
+    Telethon that bypasses it is ``edit_message`` for inline bot messages,
+    which this project has no way to reach.
+    """
+
+    def __init__(self, *args: object, guard: RpcGuard | None = None, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._rpc_guard = guard
+
+    async def __call__(self, request, ordered=False, flood_sleep_threshold=None):
+        guard = getattr(self, "_rpc_guard", None)
+        if guard is None:
+            # auth.py runs without a ledger: logging in precedes any budget,
+            # and it is a deliberate human action rather than agent traffic.
+            return await super().__call__(request, ordered=ordered)
+
+        method = request_name(request)
+        async with guard.reserve(method):
+            try:
+                return await super().__call__(request, ordered=ordered)
+            except Exception as exc:
+                await guard.note_failure(exc, method)
+                raise
+
+
+def build_client(
+    config: Config,
+    *,
+    session_base: Path | None = None,
+    guard: RpcGuard | None = None,
+) -> TelegramClient:
+    """Create a Telethon client bound to a session file (SPEC-SEC-007, SPEC-SEC-008).
+
+    This is the only construction site in the project. ``auth.py``,
+    ``server.py`` and ``sync_db.py`` all come through here, which is what
+    makes the Client Identity below identical on every connection - the
+    property that actually matters, far more than the strings themselves
+    (ADR-0009).
+
+    Telethon's defaults are tuned for convenience, not for a personal account
+    under observation, so every parameter that matters is pinned explicitly
+    rather than inherited. Do not add a Telethon event handler anywhere in
+    this codebase: ``receive_updates=False`` means handlers silently never
+    fire, and re-enabling updates to "fix" that would subscribe the account to
+    every message in every group it belongs to (ADR-0009).
+
+    Args:
+        config: Validated configuration.
+        session_base: Session path without the ``.session`` suffix. Defaults
+            to the primary session; ``sync_db.py`` passes the clone.
+        guard: The global RPC limiter (SPEC-LIM-001). ``None`` only for
+            ``auth.py``, where logging in precedes any budget.
+    """
+    base = session_base if session_base is not None else config.session_path
+    return GuardedClient(
+        str(base),
+        config.api_id,
+        config.api_hash,
+        # --- Client Identity -------------------------------------------
+        # Honest and stable, never impersonating an official client. Telegram
+        # already knows this client is unofficial because it knows the api_id.
+        device_model=config.device_model,
+        system_version=config.system_version,
+        app_version=config.app_version,
+        lang_code=config.lang_code,
+        system_lang_code=config.system_lang_code,
+        # --- The constructor contract ----------------------------------
+        # The zero here is load-bearing, not a placeholder. Telethon's default
+        # of 60 makes it sleep through - that is, silently retry - every flood
+        # wait of 60 seconds or less. Scraping-induced waits are typically
+        # 5-30 seconds, so with the default every one of them is invisible:
+        # the FloodWaitError handlers in this project would never fire, and
+        # AGENTS.md's rule against retrying a flood wait would be violated
+        # inside the library. Zero makes every wait surface as an exception,
+        # so it is counted, reported, and fed to the kill switch.
+        flood_sleep_threshold=0,
+        # No real-time push. The server reads on demand; with group support
+        # this would otherwise stream every message from every group.
+        receive_updates=False,
+        # Never enable. On connect it calls updates.getDifference, which is a
+        # bulk history fetch and the exact flood risk receive_updates=False
+        # exists to avoid.
+        catch_up=False,
+        # A failing request must not silently become five requests.
+        request_retries=1,
+        # Every reconnect replays initConnection, so a network blip must not
+        # produce a handshake burst.
+        connection_retries=2,
+        retry_delay=5,
+        auto_reconnect=True,
+        # Group history fills this cache with strangers' ids and access
+        # hashes, and the cache lives in the session file that clone_session()
+        # copies on every sync run. Cap it: this project has no business
+        # accumulating access hashes for people the user never spoke to.
+        entity_cache_limit=500,
+        guard=guard,
+    )

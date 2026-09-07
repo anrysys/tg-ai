@@ -25,7 +25,8 @@ one of them is a defect - decide which, fix it, and record the decision.
 
 Areas are defined in the [ID registry](../00-index/id-registry.md):
 `SND` sending, `RCV` reading live, `SRCH` searching the archive, `SYNC`
-filling the archive, `PSN` per-Dialog style, `SEC` credentials and locality.
+filling the archive, `PSN` per-Dialog style, `SEC` credentials and locality,
+`LIM` pacing, budgets and the kill switch.
 
 ---
 
@@ -641,3 +642,140 @@ second connection. Cloning before locking would additionally copy a SQLite file
 the server may be mid-write on.
 **Decided by.** [ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md).
 **Test.** `tests/test_connection_lock.py`.
+
+---
+
+## LIM - Pacing, budgets and the kill switch
+
+### SPEC-LIM-001 - One serialising limiter for every request
+
+**Requirement.** Every Telegram request MUST pass through a single limiter
+installed at the Telethon client level, not at each call site. The limiter MUST
+hold a lock so two concurrent tool calls can never issue overlapping requests,
+and MUST enforce a minimum gap of 1.5 seconds plus jitter between any two
+requests of any kind.
+
+The limiter MUST be re-entrant for nested requests issued from within an
+already-authorised request in the same task, and those nested requests MUST
+still be counted and paced.
+
+**Rationale.** Telegram's limits are per account across all methods, so pacing
+has to be global; a control that a new call site can forget is not a control.
+Telethon pipelines happily, and a bursty parallel pattern is a stronger signal
+than a fast serial one.
+
+Re-entrancy is a correctness requirement rather than a convenience. Telethon's
+`_call` issues nested requests of its own - every request's `resolve()` may call
+`get_input_entity`, which calls `self(GetUsersRequest(...))` - so a plain lock
+held across the delegate deadlocks in the same task, permanently and with no
+traceback.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_rpc_guard.py` - in particular
+`test_a_nested_request_in_the_same_task_does_not_deadlock`,
+`test_two_separate_tasks_are_serialised_and_never_overlap` and
+`test_consecutive_requests_are_spaced_by_at_least_the_minimum_gap`.
+
+### SPEC-LIM-002 - The request budget is rolling and persisted
+
+**Requirement.** The limiter MUST enforce a rolling budget of 60 requests per
+hour and 500 per 24 hours, counted from `api_call_log` in PostgreSQL and shared
+by every process. Windows MUST be rolling (`now() - interval`), never calendar
+buckets. An exhausted budget MUST return an `ERROR:` naming the budget; it MUST
+NOT queue and wait. When the budget cannot be read, the limiter MUST refuse.
+
+**Rationale.** An MCP stdio server is spawned fresh by the client on every
+launch and again after every crash, so a counter in a Python variable resets
+whenever the user reopens their editor: in-memory rate limiting in an MCP server
+is not rate limiting. A calendar bucket would allow the whole hourly budget at
+10:59 and again at 11:01. Queueing would turn a volume cap into a delay, and the
+point is that the requests do not happen. Failing open would make `docker stop`
+the cheapest bypass.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_rpc_guard.py::test_an_exhausted_budget_survives_a_process_restart`,
+`::test_an_unreachable_ledger_refuses_rather_than_running_unmetered`, and
+`tests/test_rpc_sql.py`.
+
+### SPEC-LIM-003 - The flood kill switch
+
+**Requirement.** Every `FloodWaitError`, `SlowModeWaitError`,
+`FloodPremiumWaitError` and `PeerFloodError` MUST be recorded in `api_flood_log`
+with its timestamp, method and target. Three or more flood events within a
+rolling hour, from any process, MUST trip a kill switch that blocks every
+Telegram-touching operation in both entrypoints for 24 hours. A `PeerFloodError`
+MUST trip it **indefinitely**, cleared only by the account owner through
+`just tg-killswitch-clear`.
+
+**Rationale.** Flood *frequency* is what feeds Telegram's server-side risk
+score, so the count matters more than any single wait. A `PeerFloodError` is an
+escalation rather than a cooldown: Telegram has flagged the account for spam,
+and only a person who has checked it with @SpamBot should decide it is healthy.
+`FloodPremiumWaitError` does not exist in the pinned telethon 1.36.0, so it is
+resolved defensively and also matched by its wire string - a flood that went
+uncounted would be a blind spot in the one control that must not have one.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_rpc_guard.py::test_three_flood_waits_in_an_hour_trip_the_switch`
+and `::test_peer_flood_trips_the_switch_indefinitely`.
+
+### SPEC-LIM-004 - The quiet window
+
+**Requirement.** Every tool that touches Telegram MUST refuse during
+`TG_QUIET_HOURS` (default `01:00-08:00`, in `TG_TIMEZONE`), and `sync_db.py`
+MUST refuse to start inside it and stop cleanly when a long run crosses into it.
+Database-only tools - `tg_search_local_history`, the persona tools, and
+`tg_whoami`'s archive and safety sections - MUST keep working.
+
+**Rationale.** An account that issues API calls uniformly around the clock is
+not a person. Stopping a long run is lossless because the Sync Cursor already
+makes it resumable, so it costs patience rather than data.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_rpc_guard.py::test_nothing_is_requested_inside_the_quiet_window`
+and `::test_a_window_that_wraps_midnight_is_one_window`.
+
+### SPEC-LIM-005 - Jitter is additive and never subtracts
+
+**Requirement.** Every delay constant MUST carry random jitter, and
+`jittered(delay)` MUST NEVER return less than `delay`.
+
+**Rationale.** Fixed, perfectly repeating intervals are a bot-detection signal.
+But a symmetric formula such as `delay * (1 + random.uniform(-0.25, 0.25))`
+returns less than the constant half the time, which is exactly the lowering of
+`CHUNK_DELAY_SECONDS` and `SYNC_DIALOG_DELAY_SECONDS` that `AGENTS.md` forbids.
+The reviewed constant is a floor, not a midpoint.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_safety.py::test_jitter_never_returns_less_than_the_reviewed_constant`,
+a property test over many samples and every delay constant.
+
+### SPEC-LIM-006 - Blacklisted operations
+
+**Requirement.** The methods listed in
+[ADR-0009](../20-architecture/adr/0009-groups-and-channels.md) MUST NOT appear
+anywhere in the shipped source: member-list scraping, mass invites, joining or
+leaving, bulk contact import, bulk forwarding, the peer-harvesting family
+(`inputPeerUserFromMessage` and its siblings, `contacts.search`,
+`contacts.getLocated`, `contacts.resolvePhone`, `messages.getCommonChats`,
+`messages.getMessageReadParticipants`, `messages.getMessageReactionsList`,
+`channels.getFullChannel`, `messages.getFullChat`), presence, typing, media
+download, channel statistics and every reporting method. A request for one MUST
+return a `ToolError` explaining that it is blocked to protect the account.
+
+**Rationale.** These are the operations that get userbot scripts deactivated.
+Banning member-list scraping achieves nothing if the same data is assembled one
+message at a time, so the harvesting back door is closed with it: doing it one
+id at a time is the same thing, slower.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_blacklist.py`, which scans the shipped source for every
+name.
+
+### SPEC-LIM-007 - A per-process ceiling on Telegram-touching tool calls
+
+**Requirement.** A single MCP server process MUST refuse to touch Telegram after
+200 tool calls, returning an `ERROR:` naming the cap and telling the user to
+restart deliberately.
+
+**Rationale.** An LLM in a loop calls a tool as fast as the tool permits, and
+that is a different failure from ordinary volume: it is a bug, not a workload.
+This is the backstop, separate from the rolling budgets, and per-process because
+a restart is exactly the deliberate human act it should require.
+**Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+**Test.** `tests/test_server_limits.py::test_the_per_process_tool_call_ceiling_stops_a_loop`.
+

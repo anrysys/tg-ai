@@ -7,10 +7,15 @@ import pytest
 from telethon import errors
 
 from tg_ai.safety import (
+    CHANNEL_SYNC_DELAY_SECONDS,
     CHUNK_DELAY_SECONDS,
     FLOOD_WAIT_TEMPLATE,
+    GROUP_READ_COOLDOWN_SECONDS,
+    MIN_RPC_GAP_SECONDS,
+    SYNC_DIALOG_DELAY_SECONDS,
     describe_telegram_error,
     guarded_tool,
+    jittered,
 )
 
 
@@ -125,3 +130,33 @@ def test_a_duplicated_auth_key_is_reported_as_already_fatal():
     assert "AUTH_KEY_DUPLICATED" in described
     assert "retrying cannot bring it back" in described
     assert "just tg-auth" in described
+
+
+# --- Jitter (SPEC-LIM-005) ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        CHUNK_DELAY_SECONDS,
+        SYNC_DIALOG_DELAY_SECONDS,
+        CHANNEL_SYNC_DELAY_SECONDS,
+        MIN_RPC_GAP_SECONDS,
+        GROUP_READ_COOLDOWN_SECONDS,
+    ],
+)
+def test_jitter_never_returns_less_than_the_reviewed_constant(base):
+    # A property test over many samples, because the failure mode is
+    # probabilistic: a symmetric formula would pass a single-sample test half
+    # the time while quietly halving the pacing margin in production.
+    samples = [jittered(base) for _ in range(20_000)]
+    assert min(samples) >= base
+    assert max(samples) <= base * 1.5
+
+
+def test_jitter_actually_varies_so_the_delay_is_not_a_metronome():
+    assert len({jittered(2.5) for _ in range(100)}) > 1
+
+
+def test_jitter_of_zero_is_zero_rather_than_a_surprise_delay():
+    assert jittered(0) == 0.0

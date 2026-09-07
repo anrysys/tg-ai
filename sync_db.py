@@ -27,6 +27,8 @@ import asyncio
 import logging
 import sys
 from datetime import UTC, datetime
+from datetime import time as dt_time
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from telethon import TelegramClient
@@ -35,9 +37,16 @@ from telethon.tl.types import User
 
 from tg_ai import db
 from tg_ai.config import Config, ConfigError, load_config
-from tg_ai.safety import SYNC_DIALOG_DELAY_SECONDS
+from tg_ai.safety import (
+    SYNC_DIALOG_DELAY_SECONDS,
+    ToolError,
+    in_quiet_window,
+    jittered,
+    quiet_window_message,
+)
 from tg_ai.tg_client import (
     PeerIndex,
+    RpcGuard,
     SessionLock,
     SessionLocked,
     build_client,
@@ -100,6 +109,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--verbose", action="store_true", help="Log every batch.")
     return parser.parse_args(argv)
+
+
+def local_time(config: Config) -> dt_time:
+    """The account owner's wall-clock time, for the quiet-window check."""
+    return datetime.now(UTC).astimezone(ZoneInfo(config.timezone)).time()
 
 
 def parse_since(raw: str | None) -> datetime | None:
@@ -249,6 +263,12 @@ async def collect_targets(
 
 
 async def run(args: argparse.Namespace, config: Config) -> int:
+    # Checked before anything is locked, cloned or connected, so a sync started
+    # at 3am says why in one line instead of copying a credential first.
+    if in_quiet_window(local_time(config), config.quiet_start, config.quiet_end):
+        log.error("%s", quiet_window_message(config.quiet_start, config.quiet_end))
+        return 1
+
     # Taken before anything else touches the session. The clone shares the
     # primary's authorization key, so a sync running while the MCP server is
     # connected means two live connections on one key - the documented trigger
@@ -261,10 +281,17 @@ async def run(args: argparse.Namespace, config: Config) -> int:
     since = parse_since(args.since)
 
     pool = await db.create_pool(config.database_url)
-    client = build_client(config, session_base=session_base)
+    guard = RpcGuard(
+        db.PostgresRpcLedger(pool),
+        quiet_start=config.quiet_start,
+        quiet_end=config.quiet_end,
+        timezone=config.timezone,
+    )
+    client = build_client(config, session_base=session_base, guard=guard)
 
     try:
         await db.ensure_schema(pool)
+
         await client.connect()
         if not await client.is_user_authorized():
             log.error("Session is not authorised. Run `just tg-auth` first.")
@@ -307,10 +334,23 @@ async def run(args: argparse.Namespace, config: Config) -> int:
                 cursor,
             )
 
+            # A long backfill can run into the quiet window. Stop cleanly
+            # rather than being refused mid-request: the Sync Cursor already
+            # makes this lossless, so the next run resumes exactly here.
+            if in_quiet_window(local_time(config), config.quiet_start, config.quiet_end):
+                log.warning(
+                    "Reached the quiet window (TG_QUIET_HOURS) after %d/%d dialog(s). "
+                    "Stopping cleanly; progress is saved, rerun `just tg-sync` later.",
+                    position,
+                    len(targets),
+                )
+                break
+
             # Pace the walk: dozens of history requests per second is a
             # scripted-account signal even though nothing is being sent.
+            # Jittered, because a metronome is itself a pattern.
             if position < len(targets):
-                await asyncio.sleep(SYNC_DIALOG_DELAY_SECONDS)
+                await asyncio.sleep(jittered(SYNC_DIALOG_DELAY_SECONDS))
 
         stats = await db.archive_stats(pool)
         log.info(
@@ -346,6 +386,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(run(args, config))
     except SessionLocked as exc:
+        log.error("%s", exc)
+        return 1
+    except ToolError as exc:
+        # The kill switch, an exhausted budget, or an unreachable ledger. These
+        # are expected refusals with a message already written for a human; a
+        # traceback would bury it.
         log.error("%s", exc)
         return 1
     except FileNotFoundError as exc:

@@ -82,3 +82,78 @@ CREATE TABLE IF NOT EXISTS dialog_personas (
 -- No index beyond the primary key, on purpose. There is at most one row per
 -- Dialog, every read is by chat_id, and the only scan is the persona
 -- overview over a few hundred rows.
+
+-- --------------------------------------------------------------------------
+-- API safety state (ADR-0009).
+--
+-- These tables exist because the MCP server is a stdio process that the user's
+-- editor respawns on every launch and after every crash. A cooldown or counter
+-- held in a Python variable is therefore reset constantly: in-memory rate
+-- limiting in an MCP server is not rate limiting. Both entrypoints read and
+-- write these, so the budget is one account-wide budget rather than one per
+-- process.
+-- --------------------------------------------------------------------------
+
+-- One row per Telegram-touching operation. `scope` separates the budgets that
+-- are counted differently: 'rpc' is every MTProto request, 'group_read' is the
+-- much scarcer group and channel history read.
+CREATE TABLE IF NOT EXISTS api_call_log (
+    id        BIGSERIAL   PRIMARY KEY,
+    scope     TEXT        NOT NULL,
+    -- Method name for 'rpc', peer id for a per-target cooldown.
+    key       TEXT        NOT NULL,
+    called_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Every budget query is a rolling window (now() - interval), never a calendar
+-- bucket, so these indexes carry the timestamp. Without them the budget check
+-- degrades into a sequential scan that grows with the log.
+CREATE INDEX IF NOT EXISTS api_call_log_scope_time_idx
+    ON api_call_log (scope, called_at DESC);
+CREATE INDEX IF NOT EXISTS api_call_log_scope_key_time_idx
+    ON api_call_log (scope, key, called_at DESC);
+
+-- Every FloodWaitError, SlowModeWaitError and PeerFloodError, from any process.
+-- Flood *frequency* is what feeds Telegram's server-side risk score, so this is
+-- the input to the kill switch rather than a diagnostic.
+CREATE TABLE IF NOT EXISTS api_flood_log (
+    id          BIGSERIAL   PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    error_type  TEXT        NOT NULL,
+    method      TEXT,
+    target      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS api_flood_log_time_idx ON api_flood_log (occurred_at DESC);
+
+-- The kill switch. Rows are history: the switch is ON when a row exists with
+-- cleared_at IS NULL that has not yet expired.
+--
+-- expires_at NULL means indefinite. A PeerFloodError is an escalation, not a
+-- cooldown, so only the account owner clears it - deliberately, by hand, after
+-- checking the account with @SpamBot from the official app.
+CREATE TABLE IF NOT EXISTS api_kill_switch (
+    id         BIGSERIAL   PRIMARY KEY,
+    tripped_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reason     TEXT        NOT NULL,
+    expires_at TIMESTAMPTZ,
+    cleared_at TIMESTAMPTZ,
+    cleared_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS api_kill_switch_active_idx
+    ON api_kill_switch (tripped_at DESC) WHERE cleared_at IS NULL;
+
+-- The Client Identity actually used, recorded once. initConnection replays
+-- these on every reconnection, so a change makes the account's own
+-- Settings -> Devices entry mutate under the user. Storing them turns "treat
+-- as immutable" from a comment into something the code can notice.
+CREATE TABLE IF NOT EXISTS client_identity (
+    id               INTEGER     PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    device_model     TEXT        NOT NULL,
+    system_version   TEXT        NOT NULL,
+    app_version      TEXT        NOT NULL,
+    lang_code        TEXT        NOT NULL,
+    system_lang_code TEXT        NOT NULL,
+    recorded_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);

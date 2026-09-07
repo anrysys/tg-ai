@@ -163,12 +163,18 @@ Two implementation facts shaped it, both verified against the pinned Telethon:
   lock held across the delegate deadlocks in the same task, silently and with no
   traceback. The limiter therefore uses an owner-task guard rather than a bare
   lock, and a regression test asserts a nested call cannot hang.
-- `connect()` costs RPCs (`get_me`, then `GetState`). Denying those on an
-  exhausted budget would brick the server, including `tg_whoami` - the tool the
-  user most needs at that moment - while protecting nothing, since connecting is
-  not the ban-triggering behaviour. Bootstrap requests are therefore **counted
-  but never denied**; denial applies to the request families that carry real
-  risk.
+- `connect()` itself costs RPCs: the `initConnection` handshake bypasses
+  `__call__`, but the `get_me` and `GetState` that follow do not. An earlier
+  draft of this decision exempted those from denial so that an exhausted budget
+  could not make the server unreachable. That exemption was dropped before it
+  was written: identifying "bootstrap" requests means matching on request class
+  names, which is fragile, and `users.GetUsers` is also how ordinary entity
+  resolution works, so the exemption would have had to let through the very
+  calls it should meter. **Everything is counted and everything is deniable.**
+  The diagnostic worry it was meant to answer is solved instead by making
+  `tg_whoami` read the budget, the kill switch and the archive straight from
+  PostgreSQL: when the budget is spent, the account section reports why and
+  every other section still works.
 
 When PostgreSQL is unreachable the limiter **fails closed**. A budget that
 evaporates when the database stops is not a budget; the cheapest bypass would be

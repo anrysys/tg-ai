@@ -3,7 +3,7 @@ id: DOC-SECURITY
 title: Security
 status: active
 authority: authoritative
-updated: 2026-09-04
+updated: 2026-09-07
 related: [DOC-SRS, ADR-0004, ADR-0005, DOC-RUNBOOK-INDEX]
 ---
 
@@ -160,6 +160,32 @@ left to retry.
 [the revoked-session runbook](runbooks/session-lost-or-revoked.md). Re-authenticate
 with `just tg-auth`, and delete the stale clone - it holds a key that is now
 invalid but was, until that moment, a full credential.
+
+### RISK-09 - Flood waits accumulating silently
+
+Telethon's `flood_sleep_threshold` defaults to 60 seconds, and the library
+*sleeps on* - that is, silently retries - every flood or slow-mode wait at or
+below it. Scraping-induced waits are typically 5 to 30 seconds, so the default
+swallows almost all of them.
+
+This was live in this project for its whole history before ADR-0009. Three
+things followed from it. `AGENTS.md` forbids retrying a `FloodWaitError` because
+retrying extends the limit, and the library was doing exactly that on every run.
+`sync_db.py`'s `except FloodWaitError` handler could almost never fire, so the
+code that looked like flood handling was close to dead. And the account could be
+flood-limited many times in one run with every log line clean - while flood
+*frequency*, not the length of any single wait, is what feeds Telegram's
+server-side risk score.
+
+The failure mode is that everything looks fine right up until the account is
+restricted.
+
+**Mitigation.** `flood_sleep_threshold=0` (`SPEC-SEC-008`), so every wait
+surfaces as an exception instead of a nap. Each one is recorded in
+`api_flood_log` with its method and target, and three inside a rolling hour trip
+the kill switch (`SPEC-LIM-003`). `just tg-status` shows the switch and the
+remaining budget, so the accumulation is visible before it becomes a
+restriction rather than after.
 
 ## Rules
 

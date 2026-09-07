@@ -15,6 +15,7 @@ Step-by-step recovery procedures. One file per failure mode.
 | --- | --- |
 | Nothing is set up yet | [First-time setup](first-time-setup.md) |
 | "Telegram API limit reached. We must wait N seconds" | [Flood wait recovery](flood-wait-recovery.md) |
+| "Telegram safety kill switch is ON" | [Flood wait recovery](flood-wait-recovery.md#the-kill-switch-has-tripped) |
 | "The Telegram session is no longer valid" / "No Telegram session at ..." | [Session lost or revoked](session-lost-or-revoked.md) |
 | `AUTH_KEY_DUPLICATED`, or a sync refusing to start | [Session lost or revoked](session-lost-or-revoked.md#after-auth_key_duplicated) |
 | Search finds nothing that should exist | [Resync the archive](resync-archive.md) |

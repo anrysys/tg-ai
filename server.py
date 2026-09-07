@@ -49,15 +49,20 @@ from tg_ai.formatting import (
 from tg_ai.safety import (
     CHUNK_DELAY_SECONDS,
     MAX_CHUNK_CHARS,
+    MAX_TELEGRAM_TOOL_CALLS,
+    RPC_BUDGET_PER_DAY,
+    RPC_BUDGET_PER_HOUR,
     PersonaFieldError,
     ToolError,
     guarded_tool,
+    kill_switch_message,
     sanitise_persona_field,
     sleep_between_chunks,
     split_message,
 )
 from tg_ai.tg_client import (
     PeerIndex,
+    RpcGuard,
     SessionLock,
     build_client,
     has_conversation,
@@ -79,6 +84,13 @@ _config: Config | None = None
 _client: TelegramClient | None = None
 _index: PeerIndex | None = None
 _lock: SessionLock | None = None
+_guard: RpcGuard | None = None
+
+#: Telegram-touching tool calls made by this process (SPEC-LIM-007). Per-process
+#: on purpose: this is the backstop against a runaway agent loop, which is a
+#: different failure from the rolling budgets in PostgreSQL. An LLM in a loop
+#: calls a tool as fast as the tool permits.
+_telegram_tool_calls = 0
 _pool: asyncpg.Pool | None = None
 
 
@@ -111,7 +123,19 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
     Raises:
         ToolError: The session is missing or no longer authorised.
     """
-    global _client, _index
+    global _client, _index, _guard, _telegram_tool_calls
+
+    _telegram_tool_calls += 1
+    if _telegram_tool_calls > MAX_TELEGRAM_TOOL_CALLS:
+        raise ToolError(
+            f"This server process has made {MAX_TELEGRAM_TOOL_CALLS} "
+            "Telegram-touching tool calls, which is the per-process ceiling. "
+            "That is almost always a loop rather than a plan. Nothing was "
+            "requested. Restart the MCP server deliberately if the work really "
+            "does need more, and consider tg_search_local_history, which reads "
+            "the archive and never touches Telegram."
+        )
+
     if _client is None:
         cfg = config()
         if not cfg.api_id or not cfg.api_hash:
@@ -125,7 +149,17 @@ async def telegram() -> tuple[TelegramClient, PeerIndex]:
                 f"No Telegram session at {cfg.session_file}. Run `just tg-auth` "
                 "in a terminal - login needs an SMS code and cannot happen here."
             )
-        _client = build_client(cfg)
+        # The limiter's state lives in PostgreSQL, so the pool is a
+        # prerequisite for talking to Telegram at all. That ordering is the
+        # point: a budget that disappears when the database stops is not a
+        # budget (SPEC-LIM-002).
+        _guard = RpcGuard(
+            db.PostgresRpcLedger(await database()),
+            quiet_start=cfg.quiet_start,
+            quiet_end=cfg.quiet_end,
+            timezone=cfg.timezone,
+        )
+        _client = build_client(cfg, guard=_guard)
         _index = PeerIndex(_client)
 
     if not _client.is_connected():
@@ -756,6 +790,10 @@ async def tg_whoami() -> str:
         client, _ = await telegram()
         me = await client.get_me()
         lines.append(f"Account:  {peer_label(me)} (id {me.id})")
+        # The data centre the session lives on. A silent relocation of the
+        # account is otherwise invisible, and it is exactly the kind of change
+        # that matters on an account under observation (SPEC-SEC-006).
+        lines.append(f"DC:       {client.session.dc_id}")
         if cfg.expected_username and (me.username or "").lower() != cfg.expected_username.lower():
             lines.append(
                 f"WARNING:  expected @{cfg.expected_username} - this is a different account."
@@ -764,11 +802,40 @@ async def tg_whoami() -> str:
         lines.append(f"Account:  UNAVAILABLE - {exc}")
 
     lines.append(f"Session:  {cfg.session_file}")
+    lines.append(
+        f"Identity: {cfg.device_model} / {cfg.system_version} / {cfg.app_version} / "
+        f"lang {cfg.lang_code}"
+    )
+    lines.append(f"Window:   awake {cfg.quiet_end:%H:%M}-{cfg.quiet_start:%H:%M} {cfg.timezone}")
 
     try:
         pool = await database()
         stats = await db.archive_stats(pool)
         lines.append(f"Database: reachable ({cfg.database_url.rsplit('@', 1)[-1]})")
+
+        # Read straight from the archive rather than through the client, so an
+        # exhausted budget or a tripped kill switch is still legible when
+        # Telegram itself is being refused (SPEC-LIM-002, SPEC-LIM-003).
+        ledger = db.PostgresRpcLedger(pool)
+        hourly, daily = await ledger.rpc_counts()
+        lines.append(
+            f"Budget:   {max(0, RPC_BUDGET_PER_HOUR - hourly)}/{RPC_BUDGET_PER_HOUR} requests "
+            f"left this hour, {max(0, RPC_BUDGET_PER_DAY - daily)}/{RPC_BUDGET_PER_DAY} today"
+        )
+        switch = await ledger.active_kill_switch()
+        if switch is None:
+            lines.append("Safety:   kill switch off")
+        else:
+            tripped_at, reason, expires_at = switch
+            message = kill_switch_message(
+                tripped_at=tripped_at,
+                reason=reason,
+                expires_at=expires_at,
+                now=datetime.now(UTC),
+            )
+            lines.append(
+                f"Safety:   {message}" if message else "Safety:   kill switch off (lapsed)"
+            )
         lines.append(
             f"Archive:  {stats.get('messages', 0)} messages across "
             f"{stats.get('dialogs', 0)} dialogs"

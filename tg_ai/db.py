@@ -17,6 +17,7 @@ import asyncpg
 
 from tg_ai import persona
 from tg_ai.config import SCHEMA_PATH
+from tg_ai.safety import RPC_SCOPE
 
 log = logging.getLogger(__name__)
 
@@ -621,3 +622,183 @@ async def fetch_outgoing_sample(
         )
         for record in records
     ]
+
+
+# --- API safety state (ADR-0009) -------------------------------------------
+#
+# Every window below is rolling - `now() - interval` - never a calendar bucket.
+# A calendar hour resets at the top of the hour, which would let an agent spend
+# the whole budget at 10:59 and the whole budget again at 11:01.
+
+
+_RECORD_CALL_SQL = """
+INSERT INTO api_call_log (scope, key) VALUES ($1, $2)
+"""
+
+_RPC_COUNTS_SQL = """
+SELECT count(*) FILTER (WHERE called_at > now() - interval '1 hour')   AS hourly,
+       count(*) FILTER (WHERE called_at > now() - interval '24 hours') AS daily
+  FROM api_call_log
+ WHERE scope = $1
+   AND called_at > now() - interval '24 hours'
+"""
+
+_COUNT_CALLS_SQL = """
+SELECT count(*) FROM api_call_log
+ WHERE scope = $1
+   AND called_at > now() - make_interval(secs => $2::double precision)
+"""
+
+_LAST_CALL_FOR_KEY_SQL = """
+SELECT max(called_at) FROM api_call_log WHERE scope = $1 AND key = $2
+"""
+
+_RECORD_FLOOD_SQL = """
+INSERT INTO api_flood_log (error_type, method, target) VALUES ($1, $2, $3)
+"""
+
+_COUNT_FLOODS_SQL = """
+SELECT count(*) FROM api_flood_log
+ WHERE occurred_at > now() - make_interval(secs => $1::double precision)
+"""
+
+# The switch is ON when an uncleared row exists. Expiry is evaluated in Python
+# so that "expires_at IS NULL means indefinite" lives in exactly one place.
+_ACTIVE_KILL_SWITCH_SQL = """
+SELECT tripped_at, reason, expires_at
+  FROM api_kill_switch
+ WHERE cleared_at IS NULL
+ ORDER BY tripped_at DESC
+ LIMIT 1
+"""
+
+_TRIP_KILL_SWITCH_SQL = """
+INSERT INTO api_kill_switch (reason, expires_at) VALUES ($1, $2)
+"""
+
+_CLEAR_KILL_SWITCH_SQL = """
+UPDATE api_kill_switch
+   SET cleared_at = now(), cleared_by = $1
+ WHERE cleared_at IS NULL
+"""
+
+_SELECT_CLIENT_IDENTITY_SQL = """
+SELECT device_model, system_version, app_version, lang_code, system_lang_code
+  FROM client_identity WHERE id = 1
+"""
+
+_UPSERT_CLIENT_IDENTITY_SQL = """
+INSERT INTO client_identity
+       (id, device_model, system_version, app_version, lang_code, system_lang_code)
+VALUES (1, $1, $2, $3, $4, $5)
+ON CONFLICT (id) DO UPDATE SET
+    device_model     = EXCLUDED.device_model,
+    system_version   = EXCLUDED.system_version,
+    app_version      = EXCLUDED.app_version,
+    lang_code        = EXCLUDED.lang_code,
+    system_lang_code = EXCLUDED.system_lang_code,
+    recorded_at      = now()
+"""
+
+
+class PostgresRpcLedger:
+    """The persisted half of the global RPC limiter (SPEC-LIM-002).
+
+    Deliberately a plain object over a pool, with no knowledge of what any of
+    the numbers mean. Deciding whether a budget is exhausted belongs in
+    ``tg_ai.safety``, which is pure and unit-testable; this only reads and
+    writes rows. That split is also what lets the limiter be tested offline
+    against an in-memory stand-in.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def record_call(self, scope: str, key: str) -> None:
+        """Log one Telegram-touching operation."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(_RECORD_CALL_SQL, scope, key)
+
+    async def rpc_counts(self) -> tuple[int, int]:
+        """Return ``(calls in the last hour, calls in the last 24 hours)``."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(_RPC_COUNTS_SQL, RPC_SCOPE)
+        return int(row["hourly"]), int(row["daily"])
+
+    async def count_calls(self, scope: str, window_seconds: float) -> int:
+        """How many operations of ``scope`` happened inside the window."""
+        async with self._pool.acquire() as conn:
+            return int(await conn.fetchval(_COUNT_CALLS_SQL, scope, float(window_seconds)))
+
+    async def last_call_for_key(self, scope: str, key: str) -> datetime | None:
+        """When ``key`` was last touched, or ``None``. Backs the cooldowns."""
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(_LAST_CALL_FOR_KEY_SQL, scope, key)
+
+    async def record_flood(self, error_type: str, method: str, target: str | None) -> None:
+        """Record a flood, slow-mode or peer-flood event."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(_RECORD_FLOOD_SQL, error_type, method, target)
+
+    async def count_floods(self, window_seconds: float) -> int:
+        """How many flood events happened inside the window, from any process."""
+        async with self._pool.acquire() as conn:
+            return int(await conn.fetchval(_COUNT_FLOODS_SQL, float(window_seconds)))
+
+    async def active_kill_switch(self) -> tuple[datetime, str, datetime | None] | None:
+        """The uncleared trip, as ``(tripped_at, reason, expires_at)``.
+
+        ``expires_at`` of ``None`` means indefinite. Whether a dated trip has
+        lapsed is decided by ``safety.kill_switch_message``, not here.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(_ACTIVE_KILL_SWITCH_SQL)
+        if row is None:
+            return None
+        return row["tripped_at"], row["reason"], row["expires_at"]
+
+    async def trip_kill_switch(self, reason: str, expires_at: datetime | None) -> None:
+        """Trip the switch. ``expires_at=None`` makes it indefinite."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(_TRIP_KILL_SWITCH_SQL, reason, expires_at)
+        log.warning("kill switch tripped: %s", reason)
+
+    async def clear_kill_switch(self, cleared_by: str) -> int:
+        """Clear every active trip. Returns how many rows were cleared."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(_CLEAR_KILL_SWITCH_SQL, cleared_by)
+        return int(result.rsplit(" ", 1)[-1] or 0)
+
+
+async def record_client_identity(
+    pool: asyncpg.Pool,
+    *,
+    device_model: str,
+    system_version: str,
+    app_version: str,
+    lang_code: str,
+    system_lang_code: str,
+) -> dict[str, str] | None:
+    """Store the Client Identity in use; return the previous one if it differed.
+
+    ``initConnection`` replays these strings on every reconnection, so they are
+    meant to be frozen once a Session exists (`SPEC-SEC-007`). Recording them
+    turns that from a comment into something the code can notice: a caller that
+    gets a non-``None`` result knows the account's own Settings -> Devices entry
+    has just changed under the user.
+    """
+    current = {
+        "device_model": device_model,
+        "system_version": system_version,
+        "app_version": app_version,
+        "lang_code": lang_code,
+        "system_lang_code": system_lang_code,
+    }
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(_SELECT_CLIENT_IDENTITY_SQL)
+        await conn.execute(_UPSERT_CLIENT_IDENTITY_SQL, *current.values())
+
+    if row is None:
+        return None
+    previous = dict(row)
+    return previous if previous != current else None

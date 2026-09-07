@@ -61,7 +61,7 @@ def make_config(**overrides) -> Config:
 
 
 class RecordingClient:
-    """Stands in for ``TelegramClient`` and remembers how it was called."""
+    """Stands in for ``GuardedClient`` and remembers how it was called."""
 
     def __init__(self, *args, **kwargs):
         self.args = args
@@ -71,7 +71,7 @@ class RecordingClient:
 @pytest.fixture
 def recorded(monkeypatch):
     """Return a callable that builds a client and hands back the record."""
-    monkeypatch.setattr(tg_client, "TelegramClient", RecordingClient)
+    monkeypatch.setattr(tg_client, "GuardedClient", RecordingClient)
 
     def build(config=None, **kwargs):
         return build_client(config if config is not None else make_config(), **kwargs)
