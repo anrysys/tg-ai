@@ -7,10 +7,22 @@ scraper behaviour, so the important assertion in most of these tests is that
 **no API call was made**, not merely that an error came back.
 """
 
+import re
+
 import pytest
 from telethon.tl.types import Channel, Chat, User
 
-from tg_ai.safety import ToolError
+from tg_ai import db
+from tg_ai.config import SCHEMA_PATH
+from tg_ai.safety import (
+    CHANNEL_SYNC_DELAY_SECONDS,
+    GROUP_FETCH_LIMIT,
+    GROUP_READ_COOLDOWN_SECONDS,
+    GROUP_READS_PER_DAY,
+    GROUP_TARGETS_PER_RUN,
+    SYNC_DIALOG_DELAY_SECONDS,
+    ToolError,
+)
 from tg_ai.tg_client import (
     PEER_TYPE_CHANNEL,
     PEER_TYPE_GROUP,
@@ -226,3 +238,54 @@ async def test_an_empty_target_is_refused_before_anything_else():
     with pytest.raises(ToolError):
         await resolve_peer(client, FakeIndex(), "   ", allow=ANY_PEER)
     assert client.calls == []
+
+
+# --- The volume caps are values, not suggestions (SPEC-SYNC-007) ----------
+
+
+def test_a_group_read_is_exactly_one_api_call_worth_of_messages():
+    # Telegram counts requests, not messages, and one messages.getHistory
+    # returns up to 100. Raising this means pagination, which is several
+    # requests per target and the scraper signature this avoids.
+    assert GROUP_FETCH_LIMIT == 100
+
+
+def test_the_volume_caps_hold_their_reviewed_values():
+    assert GROUP_TARGETS_PER_RUN == 5
+    assert GROUP_READS_PER_DAY == 20
+    assert GROUP_READ_COOLDOWN_SECONDS == 300
+
+
+def test_a_channel_switch_is_slower_than_a_private_one():
+    # Jumping between channels faster than a human can click is what anti-bot
+    # heuristics look for.
+    assert CHANNEL_SYNC_DELAY_SECONDS >= 15
+    assert CHANNEL_SYNC_DELAY_SECONDS > SYNC_DIALOG_DELAY_SECONDS
+
+
+# --- A Peer known only from a group is not a Peer (SPEC-SND-008) ----------
+
+
+def test_the_group_only_sender_query_needs_both_halves():
+    # Seen writing in a non-user Dialog AND having no Dialog of its own. Either
+    # half alone is wrong: the first would also catch people the account really
+    # does talk to, and the second would catch anyone simply not yet archived.
+    statement = db._GROUP_ONLY_SENDER_SQL
+    assert "d.peer_type <> 'user'" in statement
+    assert "NOT EXISTS" in statement
+    assert "AND NOT EXISTS" in statement
+
+
+def test_the_group_only_sender_query_binds_its_id():
+    statement = db._GROUP_ONLY_SENDER_SQL
+    assert "$1" in statement
+    assert "%s" not in statement
+    assert not re.search(r"\{[a-z_]*\}", statement)
+
+
+def test_sender_id_is_documented_as_attribution_only():
+    # The schema has to say it, because the next person to read it would
+    # otherwise take it for a foreign key to a person.
+    schema = SCHEMA_PATH.read_text(encoding="utf-8")
+    assert "COMMENT ON COLUMN messages.sender_id" in schema
+    assert "never a send target" in schema

@@ -66,7 +66,10 @@ instruction must not be able to trigger it in one step.
 **Decided by.** [ADR-0005](../20-architecture/adr/0005-hard-block-send-to-unknown-peers.md),
 extended for Groups and Channels by
 [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
-**Test.** `tests/test_peer_rules.py` for the posting-rights rules
+**Test.** `tests/test_server_limits.py` for the Group and Channel guard end to
+end (`test_a_channel_subscriber_cannot_post`,
+`test_a_group_the_account_has_left_is_refused`);
+`tests/test_peer_rules.py` for the posting-rights rules
 (`test_a_channel_subscriber_may_not_post`,
 `test_a_channel_admin_with_post_rights_may_post`,
 `test_a_group_that_bans_sending_is_writable_only_by_an_admin`). Manual:
@@ -166,10 +169,9 @@ now surfaces as an error rather than being slept through (`SPEC-SEC-008`).
 Refusing up front is better than getting there, and it leaves the user with a
 message that was either sent whole or not at all.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
-**Test.** Manual: a 9000-character body addressed to a group returns
-`ERROR: ... would be sent ... as 3 separate messages` and the Telegram app shows
-nothing. `tg_ai/safety.split_message` is unit-tested separately by
-`tests/test_chunking.py`.
+**Test.** `tests/test_server_limits.py::test_a_message_needing_two_chunks_is_refused_for_a_group`,
+which also asserts that not even the first chunk is sent. `split_message`
+itself is covered by `tests/test_chunking.py`.
 
 ### SPEC-SND-008 - A Peer seen only in a Group is never a target
 
@@ -189,8 +191,9 @@ archive is what makes the check possible without asking Telegram: an id that
 appears as a sender in a non-user Dialog and has no Dialog of its own is such a
 Peer.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
-**Test.** `db.is_group_only_sender` and its statement; manual: a numeric id
-taken from a group message returns the refusal with nothing requested.
+**Test.** `tests/test_server_limits.py::test_a_peer_seen_only_in_a_group_is_refused_before_connecting`,
+which leaves `telegram()` unstubbed so that reaching it fails the test;
+`tests/test_group_rules.py` for the query shape and the schema comment.
 
 ---
 
@@ -481,9 +484,10 @@ fraud model than the gap between two reads, which is why the caps are on counts
 and the delays are merely floors. A complete group history is not worth looking
 like a scraper for.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
-**Test.** Verified live: syncing one group produced exactly one
-`GetHistoryRequest` in `api_call_log` and 100 rows; a second run added 0; and a
-run naming 6 groups aborted, naming all six.
+**Test.** `tests/test_group_rules.py` pins the caps as values. Verified live:
+syncing one group produced exactly one `GetHistoryRequest` in `api_call_log`
+and 100 rows; a second run added 0; and a run naming 6 groups aborted, naming
+all six.
 
 ---
 
@@ -623,9 +627,10 @@ worse, would let other people's writing shape what the file claims is the
 account owner's own voice - which is then replayed into the drafting context on
 every later read (`RISK-07`).
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
-**Test.** Manual, verified live: both Persona tools return
-`ERROR: ... is a group, and a Dialog Persona describes how the account writes to
-one person`. The overview query filters on `d.peer_type = 'user'`.
+**Test.** `tests/test_server_limits.py::test_a_persona_is_refused_for_a_group_or_channel`
+and `::test_both_persona_tools_go_through_the_guard`, which asserts neither tool
+can reach around the guard. The overview query filters on
+`d.peer_type = 'user'`.
 
 ---
 

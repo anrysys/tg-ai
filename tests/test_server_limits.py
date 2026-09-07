@@ -9,8 +9,10 @@ ever touched.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from telethon.tl.types import Channel, User
 
 import server
+from tg_ai import db
 from tg_ai.safety import (
     GROUP_READ_COOLDOWN_SECONDS,
     GROUP_READS_PER_DAY,
@@ -157,3 +159,195 @@ async def test_recording_a_read_never_breaks_the_read_that_already_happened(monk
 
     monkeypatch.setattr(server, "database", broken_database)
     await server.record_group_read(-100123)
+
+
+# --- Personas are private-chat only (SPEC-PSN-009) ------------------------
+
+
+def make_dialog_ref(chat_id: int = 500, label: str = "@team") -> db.DialogRef:
+    return db.DialogRef(
+        chat_id=chat_id,
+        username=label.lstrip("@"),
+        display_name="Team",
+        message_count=100,
+        outgoing_count=0,
+        has_persona=False,
+    )
+
+
+@pytest.fixture
+def archived(monkeypatch):
+    """Resolve any target to one archived Dialog of a chosen Peer Type."""
+
+    def configure(peer_type: str):
+        async def fake_archived_dialog(pool, target):
+            return make_dialog_ref()
+
+        async def fake_get_peer_type(pool, chat_id):
+            return peer_type
+
+        async def fake_database():
+            return object()
+
+        monkeypatch.setattr(server, "database", fake_database)
+        monkeypatch.setattr(server, "archived_dialog", fake_archived_dialog)
+        monkeypatch.setattr(server.db, "get_peer_type", fake_get_peer_type)
+
+    return configure
+
+
+@pytest.mark.parametrize("kind", ["group", "channel"])
+async def test_a_persona_is_refused_for_a_group_or_channel(archived, kind):
+    archived(kind)
+
+    with pytest.raises(ToolError) as caught:
+        await server.persona_dialog(object(), "@team")
+
+    message = str(caught.value)
+    assert kind in message
+    assert "private chats only" in message
+
+
+async def test_a_persona_still_resolves_for_a_person(archived):
+    archived("user")
+    dialog = await server.persona_dialog(object(), "@ann")
+    assert dialog.chat_id == 500
+
+
+async def test_an_unknown_peer_type_is_not_treated_as_a_group(archived):
+    # Rows archived before peer_type existed default to 'user' in the schema,
+    # but a NULL must not turn an ordinary person's persona into an error.
+    archived(None)
+    assert await server.persona_dialog(object(), "@ann") is not None
+
+
+async def test_both_persona_tools_go_through_the_guard():
+    # The guard is only worth having if neither tool can reach around it.
+    import inspect
+
+    for tool in (server.tg_get_dialog_persona, server.tg_set_dialog_persona):
+        source = inspect.getsource(tool)
+        assert "persona_dialog(" in source
+        assert "archived_dialog(" not in source
+
+
+# --- The Group and Channel send guard (SPEC-SND-001, SPEC-SND-007) --------
+
+
+class SendRecordingClient:
+    """A client that records sends and fails if one it should not make happens."""
+
+    def __init__(self, me_id: int = 1) -> None:
+        self.sent: list[tuple[object, str]] = []
+        self._me = User(id=me_id, first_name="Me", bot=False, deleted=False)
+
+    async def get_me(self):
+        return self._me
+
+    async def send_message(self, peer, text):
+        self.sent.append((peer, text))
+
+
+class StubIndex:
+    async def contact_ids(self, *, force: bool = False) -> set[int]:
+        return set()
+
+
+@pytest.fixture
+def sending(monkeypatch):
+    """Wire tg_send_message to a stub client that resolves to ``peer``."""
+    client = SendRecordingClient()
+
+    def target(peer):
+        async def fake_telegram():
+            return client, StubIndex()
+
+        async def fake_resolve(_client, _index, _target, *, allow=None):
+            return peer, True
+
+        async def fake_database():
+            return object()
+
+        async def not_group_only(pool, user_id):
+            return False
+
+        monkeypatch.setattr(server, "telegram", fake_telegram)
+        monkeypatch.setattr(server, "resolve_peer", fake_resolve)
+        monkeypatch.setattr(server, "database", fake_database)
+        monkeypatch.setattr(server.db, "is_group_only_sender", not_group_only)
+        return client
+
+    return target
+
+
+def channel(**kwargs) -> Channel:
+    defaults = {"id": 900, "title": "News", "photo": None, "date": None, "broadcast": True}
+    return Channel(**{**defaults, **kwargs})
+
+
+def supergroup(**kwargs) -> Channel:
+    defaults = {"id": 901, "title": "Team", "photo": None, "date": None, "megagroup": True}
+    return Channel(**{**defaults, **kwargs})
+
+
+async def test_a_message_needing_two_chunks_is_refused_for_a_group(sending):
+    client = sending(supergroup())
+
+    result = await server.tg_send_message("Team", "x" * 9000)
+
+    assert result.startswith("ERROR: ")
+    assert "separate messages" in result
+    # Nothing at all, not even the first chunk: a partial send would leave the
+    # user with half a message and no way to tell.
+    assert client.sent == []
+
+
+async def test_a_channel_subscriber_cannot_post(sending):
+    client = sending(channel())
+
+    result = await server.tg_send_message("News", "hello")
+
+    assert result.startswith("ERROR: ")
+    assert "posting rights" in result
+    assert "nothing was requested from telegram" in result.lower()
+    assert client.sent == []
+
+
+async def test_a_group_the_account_has_left_is_refused(sending):
+    client = sending(supergroup(left=True))
+
+    result = await server.tg_send_message("Team", "hello")
+
+    assert result.startswith("ERROR: ")
+    assert "not a member" in result
+    assert "will not join" in result
+    assert client.sent == []
+
+
+async def test_a_short_message_to_a_group_is_sent(sending):
+    client = sending(supergroup())
+
+    result = await server.tg_send_message("Team", "hello")
+
+    assert result.startswith("Sent to ")
+    assert len(client.sent) == 1
+
+
+async def test_a_peer_seen_only_in_a_group_is_refused_before_connecting(monkeypatch):
+    # The Send Guard for Min Peers runs before anything touches Telegram, so
+    # this test deliberately leaves `telegram` unstubbed: reaching it would
+    # raise, and the test would fail.
+    async def fake_database():
+        return object()
+
+    async def group_only(pool, user_id):
+        return True
+
+    monkeypatch.setattr(server, "database", fake_database)
+    monkeypatch.setattr(server.db, "is_group_only_sender", group_only)
+
+    result = await server.tg_send_message("8873675373", "hello")
+
+    assert result.startswith("ERROR: ")
+    assert "only ever seen writing inside a group" in result
+    assert "nothing was requested from telegram" in result.lower()

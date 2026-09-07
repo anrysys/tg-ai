@@ -35,9 +35,9 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | Connection lock | `tests/test_connection_lock.py` | `SPEC-SEC-010` - mutual exclusion, a crashed holder releasing, the lock keyed to the primary session |
 | RPC limiter | `tests/test_rpc_guard.py` | `SPEC-LIM-001` .. `SPEC-LIM-004` - pacing, re-entrancy without deadlock, budgets surviving a restart, the kill switch, failing closed |
 | Safety SQL | `tests/test_rpc_sql.py` | `SPEC-LIM-002`, `SPEC-LIM-003` - rolling windows not calendar buckets, indexed timestamps, idempotent schema |
-| Peer resolution | `tests/test_group_rules.py` | `SPEC-SND-006` - a Group not in the Peer Index is refused **with the client asserted never called** |
+| Peer resolution | `tests/test_group_rules.py` | `SPEC-SND-006`, `SPEC-SYNC-007` - a Group not in the Peer Index is refused **with the client asserted never called**; the volume caps pinned as values |
 | Blacklist | `tests/test_blacklist.py` | `SPEC-LIM-006` - 50 forbidden identifiers absent from the shipped source |
-| Server limits | `tests/test_server_limits.py` | `SPEC-LIM-007`, `SPEC-RCV-003` - the per-process ceiling, the group cooldown and daily cap across a simulated restart |
+| Server limits | `tests/test_server_limits.py` | `SPEC-LIM-007`, `SPEC-RCV-003`, `SPEC-SND-001`, `SPEC-SND-007`, `SPEC-SND-008`, `SPEC-PSN-009` - the per-process ceiling, the group cooldown and daily cap across a simulated restart, the Group and Channel send guard, and Persona isolation |
 
 ### On "coverage"
 
@@ -62,6 +62,7 @@ These need a live account and are verified by hand. Record the result in
 | Targeted sync | `just tg-sync-targets @someone` | Only that dialog is processed; a mistyped target is named in a warning |
 | Sync resumability | Interrupt with Ctrl-C, rerun | Resumes at the cursor, not from zero |
 | Group read costs one request | `just tg-sync-targets "<a group>"`, then inspect `api_call_log` | Exactly one `GetHistoryRequest`, and no `ReadHistory` of any kind |
+| A group send actually arrives | Send one short message to a group you are in | It appears once, as one message |
 | Reading a group marks nothing read | Read a group, then open it on the phone | The unread badge is unchanged |
 | The group cooldown survives a restart | Read a group, restart the MCP server, read it again | Still refused, naming the remaining seconds |
 | A channel send is refused without an API call | `tg_send_message` to a channel you only subscribe to | `ERROR` naming posting rights, and `api_call_log` gains no row |
