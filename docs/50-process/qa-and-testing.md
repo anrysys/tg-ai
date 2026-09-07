@@ -33,6 +33,7 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | Persona safety | `tests/test_persona_render.py` | `SPEC-PSN-006`, `RISK-07` - sanitisation, the data fence, ambiguity reported not guessed |
 | Client contract | `tests/test_client_contract.py` | `SPEC-SEC-007`, `SPEC-SEC-008`, `SPEC-SEC-009` - every pinned Telethon parameter, identity identical for session and clone, zero event handlers |
 | Connection lock | `tests/test_connection_lock.py` | `SPEC-SEC-010` - mutual exclusion, a crashed holder releasing, the lock keyed to the primary session |
+| Server shutdown | `tests/test_server_shutdown.py` | `SPEC-SEC-011` - the teardown order pinned against a real `flock`, the lock released even when the disconnect fails, a hung step bounded, the lifespan registered, and a closed stdin exiting 0 |
 | RPC limiter | `tests/test_rpc_guard.py` | `SPEC-LIM-001` .. `SPEC-LIM-004` - pacing, re-entrancy without deadlock, budgets surviving a restart, the kill switch, failing closed |
 | Safety SQL | `tests/test_rpc_sql.py` | `SPEC-LIM-002`, `SPEC-LIM-003` - rolling windows not calendar buckets, indexed timestamps, idempotent schema |
 | Peer resolution | `tests/test_group_rules.py` | `SPEC-SND-006`, `SPEC-SYNC-007` - a Group not in the Peer Index is refused **with the client asserted never called**; the volume caps pinned as values |

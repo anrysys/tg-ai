@@ -194,6 +194,13 @@ Telegram invalidate the login outright
 ([ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md),
 `RISK-08`). Close the agent session, or wait for the sync to finish.
 
+Closing the agent session is enough, because the server releases the lock on
+its way out (`SPEC-SEC-011`). That is worth stating because it was not always
+true: a server that never disconnected outlived its client, and the orphan kept
+both the lock and the session file until it was killed by hand. If a stale
+`tg-ai` process ever does survive its client, `pkill -f server.py` frees both -
+the kernel drops the `flock` the moment the process dies.
+
 ## Rollback
 
 | To undo | Do |

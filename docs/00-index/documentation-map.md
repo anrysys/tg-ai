@@ -3,7 +3,7 @@ id: DOC-DOC-MAP
 title: Documentation map
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-DOCS-PROTOCOL, DOC-ROUTER]
 ---
 
@@ -29,6 +29,7 @@ change and are therefore omitted from each row.
 | Changed the sync algorithm, filters or cursor behaviour | [srs.md](../10-product/srs.md) `SPEC-SYNC-*`, [sad.md](../20-architecture/sad.md) |
 | Added, removed or upgraded a dependency | [requirements.txt](../../requirements.txt), the stack section of [AGENTS.md](../../AGENTS.md), a new ADR if it replaces an existing approach |
 | Changed process topology or session handling | [sad.md](../20-architecture/sad.md), a new ADR, [deployment-plan.md](../70-ops/deployment-plan.md) |
+| Changed how an entrypoint starts up or shuts down | [sad.md](../20-architecture/sad.md) resource lifecycle, [srs.md](../10-product/srs.md) `SPEC-SEC-*`, [deployment-plan.md](../70-ops/deployment-plan.md) if the operator's steps change. An ADR only if the lifecycle choice has a real rejected alternative |
 | Changed an environment variable | [.env.example](../../.env.example), [deployment-plan.md](../70-ops/deployment-plan.md), [srs.md](../10-product/srs.md) `SPEC-SEC-*` |
 | Added or renamed a `just` recipe | [README.md](../../README.md), [deployment-plan.md](../70-ops/deployment-plan.md) |
 | Added a test, or changed what a clause guarantees | [srs.md](../10-product/srs.md) clause `Test.` line, [qa-and-testing.md](../50-process/qa-and-testing.md) |

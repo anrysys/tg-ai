@@ -167,6 +167,27 @@ and shared for the life of the process:
 - `tg_whoami` reports each subsystem independently, so a broken session is
   distinguishable from an unreachable database.
 
+Teardown is the other half, and it is not optional (`SPEC-SEC-011`). Over stdio
+the client never says goodbye - it closes the pipe - so `server.py` registers a
+FastMCP `lifespan` whose exit disconnects the Telethon client, releases the
+connection lock and closes the pool, in that order:
+
+- **Disconnect first.** Telethon's background tasks are cancelled only by
+  `disconnect()`, and with `auto_reconnect=True` they respawn instead of ending
+  if the loop simply tears down. A process that never exits keeps the `flock`
+  and the SQLite session, and the next server dies on `database is locked`.
+- **Then the lock.** Releasing it before the socket is gone opens the window in
+  which a sync connects on the same authorization key (`SPEC-SEC-010`,
+  [ADR-0010](adr/0010-one-connection-per-authorization-key.md)).
+- **The pool last.** Telethon's auto-reconnect callback issues a `get_me()`
+  that reaches the RPC ledger, so the database must outlive anything that could
+  still be recording a call (`SPEC-LIM-002`).
+
+Each step is bounded by a timeout and cannot raise: shutdown is the one place
+where an exception has nowhere to go, and abandoning the remaining steps is
+worse than any single failure. The lifespan starts nothing - connecting on
+startup would take the session lock every time an editor spawns the server.
+
 ## Failure model
 
 Every tool is wrapped in `safety.guarded_tool`. Nothing escapes:

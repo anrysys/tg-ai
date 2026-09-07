@@ -23,8 +23,11 @@ Usage:
 # inspects tool signatures at import time and cannot resolve string
 # annotations, so tool parameters must be real runtime objects.
 
+import asyncio
 import logging
 import sys
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import asyncpg
@@ -87,8 +90,6 @@ logging.basicConfig(
 )
 logging.getLogger("telethon").setLevel(logging.WARNING)
 log = logging.getLogger("tg_ai.server")
-
-mcp = FastMCP("tg-ai")
 
 _config: Config | None = None
 _client: TelegramClient | None = None
@@ -204,6 +205,103 @@ async def database() -> asyncpg.Pool:
         _pool = await db.create_pool(config().database_url)
         await db.ensure_schema(_pool)
     return _pool
+
+
+#: How long any one teardown step may take before the server gives up on it and
+#: exits anyway (SPEC-SEC-011). The healthy path costs milliseconds; this bounds
+#: a wedged socket or a database that stopped answering. The client that closed
+#: our stdin is already waiting to reap us, and the kernel drops the flock the
+#: instant the process exits, so waiting longer buys nothing.
+SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+async def _close_quietly(what: str, closing: Awaitable[object]) -> None:
+    """Await one teardown step, bounded, and never let it raise.
+
+    Shutdown is the one place where an exception has nowhere to go: raising
+    here would abandon the steps that follow, and the step that follows is the
+    one that releases the connection lock (SPEC-SEC-010).
+    """
+    try:
+        await asyncio.wait_for(closing, SHUTDOWN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        log.warning("%s did not close within %ss - exiting anyway", what, SHUTDOWN_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - the last code to run must not raise
+        log.warning("%s failed to close: %s: %s", what, type(exc).__name__, exc)
+
+
+async def shutdown() -> None:
+    """Release everything this process holds, in the only safe order (SPEC-SEC-011).
+
+    Idempotent and non-raising. It runs from :func:`lifespan` on the normal
+    exit, and the flock release may run a second time from ``main``'s safety
+    net - by which point there is no caller left to report a failure to.
+    """
+    global _client, _index, _guard, _pool
+
+    client, pool = _client, _pool
+    # Cleared before the first await, so nothing can interleave between reading
+    # them and resetting them: a second call finds None and does nothing.
+    # ``_lock`` is deliberately kept - see the release below.
+    _client = _index = _guard = _pool = None
+
+    # _telegram_tool_calls is deliberately NOT reset. It counts one runaway
+    # agent loop, not one connection, and clearing it here would hand a looping
+    # agent a fresh ceiling every time the client is rebuilt (SPEC-LIM-007).
+
+    if client is None and pool is None:
+        # Registered but never used: the lazy paths in telegram() and
+        # database() never ran. Nothing to release, and nothing worth logging.
+        return
+
+    log.info("shutting down")
+    try:
+        if client is not None:
+            # Unconditional, unlike sync_db.py's `if client.is_connected()`.
+            # Telethon opens the SQLite session in the constructor and closes
+            # it only in disconnect(), and this server can hold a
+            # built-but-never-connected client: telegram() assigns _client
+            # before SessionLock.acquire(), which refuses outright while a sync
+            # runs. Disconnecting an already-disconnected client is a no-op.
+            await _close_quietly("Telegram connection", client.disconnect())
+    finally:
+        if _lock is not None:
+            # After the disconnect, never before. The gap between dropping the
+            # flock and dropping the socket is exactly the window in which a
+            # sync connects on the same authorization key, and Telegram answers
+            # that with AUTH_KEY_DUPLICATED - which invalidates the login
+            # rather than failing the call (SPEC-SEC-010, ADR-0010).
+            _lock.release()
+        if pool is not None:
+            # Last. Telethon's auto-reconnect callback issues a high-level
+            # get_me(), which goes through GuardedClient.__call__ into the
+            # RpcGuard and writes to the ledger - so the database has to
+            # outlive anything that could still be recording a call
+            # (SPEC-LIM-002).
+            await _close_quietly("database pool", pool.close())
+
+
+@asynccontextmanager
+async def lifespan(_app: FastMCP) -> AsyncIterator[None]:
+    """Tear the process down while there is still an event loop to do it in.
+
+    Nothing is started here, on purpose. Connecting on startup would take the
+    session lock every time an editor spawns this server - the very thing that
+    would block a sync - so the client and the pool stay lazy.
+
+    The SDK enters this on an ``AsyncExitStack`` *outside* the task group that
+    runs tool calls, so when the client closes stdin the in-flight tools finish
+    first and the exit below still has a live loop to disconnect on. An
+    ``atexit`` hook cannot do this: it runs after the loop is closed, and a
+    fresh loop cannot await futures that belong to the dead one (SPEC-SEC-011).
+    """
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
+mcp = FastMCP("tg-ai", lifespan=lifespan)
 
 
 # --------------------------------------------------------------------------
@@ -1058,11 +1156,27 @@ async def tg_whoami() -> str:
 def main() -> None:
     try:
         config()
-    except ConfigError as exc:
+    except (ConfigError, ToolError) as exc:
+        # Both, because config() translates ConfigError into ToolError for the
+        # tools' benefit. Catching only ConfigError here made this clause dead
+        # code: a bad TG_TIMEZONE exited 1 with a raw traceback.
         log.error("Configuration error: %s", exc)
         raise SystemExit(2) from exc
     log.info("tg-ai MCP server starting on stdio")
-    mcp.run(transport="stdio")
+    try:
+        mcp.run(transport="stdio")
+    except KeyboardInterrupt:
+        # Ctrl-C on a foreground `just tg-serve` is how a human stops this. It
+        # is not a failure: exit 0, no traceback. lifespan has already run by
+        # the time this is caught.
+        log.info("interrupted - shutting down")
+    finally:
+        # The only teardown step that still works once the event loop is gone.
+        # A second Ctrl-C cancels lifespan mid-flight, and an abandoned flock
+        # would make the next sync refuse to run. release() is idempotent, so
+        # on the normal path this costs nothing (SPEC-SEC-010, SPEC-SEC-011).
+        if _lock is not None:
+            _lock.release()
 
 
 if __name__ == "__main__":

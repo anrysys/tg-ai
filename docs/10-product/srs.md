@@ -817,7 +817,44 @@ that arrives in time to back off, so the only defence is never to open the
 second connection. Cloning before locking would additionally copy a SQLite file
 the server may be mid-write on.
 **Decided by.** [ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md).
-**Test.** `tests/test_connection_lock.py`.
+**Test.** `tests/test_connection_lock.py`. Shutdown, the other half of "until it
+disconnects", is `SPEC-SEC-011`.
+
+### SPEC-SEC-011 - The server releases what it holds when it stops
+
+**Requirement.** When the MCP client closes stdin, or the operator sends SIGINT,
+`server.py` MUST disconnect the Telethon client, then release the connection
+lock, then close the database pool, and MUST exit with status 0. The teardown
+MUST be idempotent, MUST NOT raise, and each step MUST be bounded by a timeout
+so one wedged resource cannot prevent the exit. The ordering is normative:
+release before disconnect, or pool close before disconnect, are both defects.
+Startup MUST remain lazy - the shutdown hook MUST NOT connect anything.
+
+**Rationale.** stdio has no goodbye message; the client just closes the pipe.
+Telethon's sender, keepalive and update tasks are cancelled only by
+`disconnect()`, and with `auto_reconnect=True` they respawn rather than end
+during interpreter teardown, so the process never exits. That orphan keeps both
+the `flock` and the SQLite session file, and the next server dies on `database
+is locked`. `disconnect()` is also the only caller of `session.close()`, so
+without it every stop leaves a `.session-journal` behind.
+
+The ordering carries the safety. Releasing the lock before the socket is gone
+opens the window in which a sync connects on the same authorization key, which
+Telegram answers with `AUTH_KEY_DUPLICATED` (`SPEC-SEC-010`). Closing the pool
+first breaks the other end: Telethon's auto-reconnect callback issues a
+`get_me()` that reaches the RPC ledger (`SPEC-LIM-002`).
+
+The hook is FastMCP's `lifespan`, entered by the SDK on an `AsyncExitStack`
+outside the task group that runs tool calls - so in-flight tools finish first
+and the event loop is still alive during teardown. **Rejected:** an `atexit`
+hook, which runs after the loop is closed and cannot await futures belonging to
+it; a SIGTERM handler, since the kernel already drops the flock on an
+unconditional kill; and a hard `os._exit`, which would skip the session flush
+that is half the point. SIGTERM handling is recorded as an open task rather
+than a comment.
+**Decided by.** Implements [ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md);
+decides nothing new.
+**Test.** `tests/test_server_shutdown.py`.
 
 ---
 

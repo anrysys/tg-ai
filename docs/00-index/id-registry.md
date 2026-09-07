@@ -43,7 +43,7 @@ one at the moment you write the thing, and record it here in the same change.
 | `SPEC-SRCH-001` .. `SPEC-SRCH-006` | In use |
 | `SPEC-SYNC-001` .. `SPEC-SYNC-007` | In use |
 | `SPEC-PSN-001` .. `SPEC-PSN-009` | In use |
-| `SPEC-SEC-001` .. `SPEC-SEC-010` | In use |
+| `SPEC-SEC-001` .. `SPEC-SEC-011` | In use |
 | `SPEC-LIM-001` .. `SPEC-LIM-007` | In use |
 | `ADR-0000` .. `ADR-0010` | In use (`0000` is the template) |
 | `RISK-01` .. `RISK-10` | In use |

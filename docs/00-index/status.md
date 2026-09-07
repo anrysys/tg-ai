@@ -26,7 +26,7 @@ has ever been sent** by this project, which is still M5 and needs the user.
 | Database schema and access | Done. Verified live against PostgreSQL 16 |
 | `auth.py` | Written, **never executed** - a session already exists, so re-login has not been needed |
 | `sync_db.py` | Verified against the real account. `--targets` also selects groups and channels, capped at 5 per run and one request each |
-| `server.py` | Done. Nine tools, all verified against the real account. Reads groups and channels under a persisted cooldown |
+| `server.py` | Done. Nine tools, all verified against the real account. Reads groups and channels under a persisted cooldown. Shuts down cleanly on stdin EOF and Ctrl-C (`SPEC-SEC-011`) |
 | Dialog Persona | Code complete (M6). Exercised end to end against the live PostgreSQL with fixture data; never yet written for a real person |
 | Groups and channels | Code complete (M7). Read, sync, send guard and caps all verified live |
 | Documentation base | Done |
@@ -36,7 +36,17 @@ has ever been sent** by this project, which is still M5 and needs the user.
 
 Empirically, on this machine:
 
-- 336 offline tests pass, 1 skipped (`FloodPremiumWaitError` does not exist in
+- `server.py` no longer orphans itself. It never released anything on exit, so
+  once a tool had connected, Telethon's background tasks kept the event loop
+  alive and the process outlived its client holding the connection `flock` and
+  the SQLite session - which is what made a later server die on `database is
+  locked`. Measured before and after: Ctrl-C exited **-2** with a 72-line
+  traceback and now exits **0** with one log line; stdin EOF leaves no process
+  behind, and stdout stays empty in both cases. The teardown order is
+  pinned by `SPEC-SEC-011` and by three mutations of `server.py` confirmed to
+  turn the new tests red. The live path - a tool connects, then the client goes
+  away - has not yet been exercised against the real account.
+- 365 offline tests pass, 1 skipped (`FloodPremiumWaitError` does not exist in
   telethon 1.36.0, and the test says so rather than pretending to cover it);
   `ruff` and `black` clean.
 - CI reproduces that result again. It had been failing on `main`: `ci.yml`
