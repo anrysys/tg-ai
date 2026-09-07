@@ -3,7 +3,7 @@ id: DOC-MCP-TOOLS
 title: MCP tool contract
 status: active
 authority: derived
-updated: 2026-09-04
+updated: 2026-09-07
 related: [DOC-SRS, DOC-ROUTER]
 ---
 
@@ -25,20 +25,25 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
     "description": "Send a Telegram message from the user's own account.",
     "required": ["target", "message"],
     "properties": {
-      "target":  {"type": "string", "description": "@username, +phone, numeric id, or 'me'"},
-      "message": {"type": "string", "description": "Any length; split automatically"}
+      "target":  {"type": "string", "description": "@username, +phone, numeric id, 'me', or a group/channel title"},
+      "message": {"type": "string", "description": "Any length for a person; a group or channel message must fit one chunk"}
     }
   },
   "tg_get_recent_messages": {
-    "description": "Read the latest messages with one person, live from Telegram.",
+    "description": "Read the latest messages in one chat, live from Telegram. Works for a person, group or channel you are in.",
     "required": ["target"],
     "properties": {
       "target": {"type": "string"},
       "limit":  {"type": "integer", "default": 10, "clamped": [1, 100]}
+    },
+    "limits": {
+      "group_cooldown_seconds": 300,
+      "group_reads_per_day": 20,
+      "note": "Both are stored in PostgreSQL and survive a server restart."
     }
   },
   "tg_get_unread_dialogs": {
-    "description": "List people who have sent unread messages.",
+    "description": "List people who have sent unread messages. Groups and channels are excluded.",
     "required": [],
     "properties": {
       "limit": {"type": "integer", "default": 5, "clamped": [1, 50]}
@@ -97,6 +102,24 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
 }
 ```
 
+## Groups and channels
+
+Every tool that takes a `target` accepts a group or channel **you are already a
+member of**, named by its title, `@username` or numeric id.
+
+| Rule | Behaviour |
+| --- | --- |
+| Not a member | Refused, with **no API call** - this server never joins or looks up a group you have not joined |
+| Reading | 300 s cooldown per target, 20 reads a day, 100 messages per read. Persisted, so a restart does not clear them |
+| Sending to a group | Allowed while you are a member, and only if the group permits it |
+| Sending to a channel | Refused unless you have `post_messages` admin rights there. Checked from cache, so a refusal costs nothing |
+| Long messages | Refused for a group or channel if they would need more than one chunk - shorten instead |
+| Senders inside a group | Attribution only. `tg_send_message` refuses an id it has only seen writing in a group |
+| Personas | Not available. `tg_get_dialog_persona` and `tg_set_dialog_persona` return an error for a group or channel |
+
+The reasoning is in
+[ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+
 ## Choosing the right tool
 
 | The user asks | Use |
@@ -105,7 +128,8 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
 | "Did anyone write to me?" | `tg_get_unread_dialogs` |
 | "What did @someone reply?" | `tg_get_recent_messages` - reads live, sees the last minute |
 | "What did we agree about X?" / "find …" | `tg_search_local_history` - reads the archive, sees years |
-| "Something is not working" | `tg_whoami` first, always |
+| "What is happening in <group>?" | `tg_get_recent_messages` - but at most once per 5 minutes per group |
+| "Something is not working" | `tg_whoami` first, always - it reports the request budget and the kill switch even when Telegram is refused |
 
 `tg_get_recent_messages` sees new messages but only a short window.
 `tg_search_local_history` sees the whole history but only as of the last sync.

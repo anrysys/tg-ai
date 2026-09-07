@@ -513,8 +513,22 @@ OpenCode and others. See the install matrix above.
 
 ### Does it read group chats and channels?
 
-No. Private one-on-one chats with people only. Groups, channels, bots and
-Telegram's own service account are excluded from the sync and from every tool.
+Yes, but deliberately grudgingly. It reads groups and channels **you have
+already joined**, and only ones you name explicitly - a routine sync still
+covers private chats only.
+
+Each group can be read at most once every five minutes, with a ceiling of twenty
+group reads a day and one hundred messages per read, which is a single API call.
+Those counters live in the database, so restarting the server does not reset
+them.
+
+It will **never join** a group or channel for you, and it cannot read one you
+have not joined - looking up channels you are not in is the behaviour that gets
+personal accounts flagged as scrapers. It never fetches member lists, and it
+cannot message someone it has only seen writing in a group. In a channel it can
+post only if you are an admin there.
+
+Bots and Telegram's own service account remain excluded.
 
 ### What is the Model Context Protocol?
 
@@ -541,7 +555,10 @@ just              # list everything
 just check        # ruff + black + pytest + docs checks
 just tg-sync      # refresh the archive (incremental)
 just tg-sync-targets @anna @bob   # archive only these people
-just tg-status    # account, session, database, archive health
+just tg-sync-targets "Some Group"  # or a group you have joined (max 5 per run)
+just tg-status    # account, DC, identity, request budget, kill switch, archive
+just tg-killswitch        # is the safety stop on, and why
+just tg-killswitch-clear  # turn it off, after checking the account by hand
 just db-psql      # psql shell into the archive
 ```
 
@@ -554,9 +571,12 @@ how changes are made here.
 
 ## Scope
 
-Private 1-on-1 text chats with people. Not groups, not channels, not bots, not
-media, and nothing that deletes or edits messages on your account. See the
-non-goals in [docs/10-product/prd.md](docs/10-product/prd.md).
+Text chats. Private conversations with people, plus groups and channels you have
+already joined, read under strict per-target and per-day limits. Not bots, not
+media, and nothing that deletes or edits messages on your account. It never
+joins a group, never fetches a member list, and never messages someone it has
+only seen writing in one. See the non-goals in
+[docs/10-product/prd.md](docs/10-product/prd.md).
 
 ## Contributing
 

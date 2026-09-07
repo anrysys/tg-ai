@@ -949,4 +949,3 @@ This is the backstop, separate from the rolling budgets, and per-process because
 a restart is exactly the deliberate human act it should require.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
 **Test.** `tests/test_server_limits.py::test_the_per_process_tool_call_ceiling_stops_a_loop`.
-

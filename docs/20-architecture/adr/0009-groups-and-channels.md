@@ -34,6 +34,7 @@ Telegram's own documentation sets the baseline:
 > All accounts that log in using unofficial Telegram API clients are
 > automatically put under observation to avoid violations of the Terms of
 > Service.
+>
 > - <https://core.telegram.org/api/obtaining_api_id>
 
 The goal is therefore not to hide. It is to make an account that is already

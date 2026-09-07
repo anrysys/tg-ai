@@ -496,7 +496,11 @@ Stated plainly, because a tool that oversells itself wastes your time:
   repository. tg-ai is passive: it sleeps until a client calls it. Autonomous
   replies require an agent loop running on top - see
   [5. Chained and autonomous workflows](#5-chained-and-autonomous-workflows).
-- **No groups and no channels.** Private one-on-one chats with people only.
+- **Groups and channels are rationed, not free.** It reads groups and
+  channels you have already joined, one at a time, at most once every five
+  minutes each and twenty reads a day. It will never join one for you, and
+  it cannot read one you have not joined. In a channel it can only post if
+  you are an admin there.
 - **No media.** Only message text is archived and sent - no photos, files or
   voice notes.
 - **It never deletes or edits** anything on your account, and reading never marks

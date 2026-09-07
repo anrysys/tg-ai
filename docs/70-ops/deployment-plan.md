@@ -3,7 +3,7 @@ id: DOC-DEPLOY
 title: Deployment plan
 status: active
 authority: authoritative
-updated: 2026-09-05
+updated: 2026-09-07
 related: [DOC-SAD, DOC-SECURITY, DOC-RUNBOOK-INDEX]
 ---
 
@@ -38,8 +38,34 @@ Creates `.venv`, installs `requirements.txt`, and copies `.env.example` to
 
 ### 2. Configure
 
-Edit `.env` and set `TG_API_ID` and `TG_API_HASH`. Everything else has a working
-default.
+Edit `.env` and set `TG_API_ID` and `TG_API_HASH`.
+
+Then set **`TG_LANG_CODE`** to the interface language of the official Telegram
+app on the account owner's phone. It defaults to `en` because this is a public
+repository and no language is right for everyone, and that default is unsafe for
+anyone whose app is in another language: every connection reports it, alongside
+a phone number and an `api_id` Telegram has already seen used from the official
+app for years, so a mismatch is a contradiction in Telegram's own records
+(`SPEC-SEC-007`).
+
+Everything else has a working default. `TG_TIMEZONE` is detected from the
+machine, and `TG_QUIET_HOURS` defaults to `01:00-08:00` local, during which
+nothing touches Telegram. `TG_DEVICE_MODEL`, `TG_SYSTEM_VERSION` and
+`TG_APP_VERSION` are derived if left blank - but once a session exists, treat
+all five as **frozen**: `initConnection` replays them on every reconnection, so
+changing one makes the account's own Settings -> Devices entry mutate under the
+user.
+
+### The two rules that are not in `.env`
+
+Neither has a flag, and neither can be relaxed (`SPEC-SEC-006`):
+
+- **Run this on the account owner's own machine and network.** Never a VPS,
+  cloud host, container platform or CI runner; never a shared or rotating VPN.
+  Where the packets come from is the strongest userbot signal Telegram has.
+- **Use the account owner's own `api_id`.** Never a published or borrowed one -
+  Telegram answers those with `API_ID_PUBLISHED_FLOOD` and treats the account
+  behind them as an abuser.
 
 ### 3. Start the archive database
 
@@ -152,11 +178,21 @@ session path, `Database: reachable`, and non-zero archive counts.
 | --- | --- | --- |
 | Refresh the archive | `just tg-sync` | Daily, or before a broad search |
 | Archive specific people first | `just tg-sync-targets @a @b` | On a large account, before the full backfill |
+| Archive a group you are in | `just tg-sync-targets "Some Group"` | Deliberately, at most 5 per run and 20 reads a day |
+| Check the safety stop | `just tg-killswitch` | When a tool says the kill switch is on |
 | Restart the database | `just db-up` | After a reboot |
 | Full check | `just check` | Before reporting any code change done |
 
-`just tg-sync` is safe to run while an agent session is open - it works on a
-session clone ([ADR-0004](../20-architecture/adr/0004-session-file-clone-for-sync.md)).
+**`just tg-sync` cannot run while an agent session is connected.** It will exit
+immediately, naming the process holding the connection.
+
+That is a deliberate change from how this used to be described. The session
+clone ([ADR-0004](../20-architecture/adr/0004-session-file-clone-for-sync.md))
+stops two processes writing one SQLite file, and nothing more - the clone
+carries the *same* authorization key, and two live connections on one key make
+Telegram invalidate the login outright
+([ADR-0010](../20-architecture/adr/0010-one-connection-per-authorization-key.md),
+`RISK-08`). Close the agent session, or wait for the sync to finish.
 
 ## Rollback
 
