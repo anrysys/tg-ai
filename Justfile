@@ -159,7 +159,19 @@ docs-lint:
 docs-english:
     #!/usr/bin/env bash
     set -euo pipefail
-    if grep -rlP '[\p{Cyrillic}\p{Greek}\p{Han}\p{Arabic}\p{Hebrew}]' \
+    # Explicit codepoint ranges rather than \p{Script}. Implementations
+    # disagree on whether \p{Greek} means Script or Script_Extensions, and
+    # under the latter U+00B7 MIDDLE DOT - ordinary punctuation, used in
+    # README.md - matches Greek, Han *and* Latin at once. ugrep flags it, GNU
+    # grep does not, so the same tree passed or failed depending on which grep
+    # was installed. Ranges say exactly what is meant and read the same
+    # everywhere. Add a range here rather than reaching back for \p{...}.
+    cyrillic='\x{0400}-\x{052F}\x{A640}-\x{A69F}'
+    greek='\x{0370}-\x{03FF}\x{1F00}-\x{1FFF}'
+    han='\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}'
+    hebrew='\x{0590}-\x{05FF}'
+    arabic='\x{0600}-\x{06FF}\x{0750}-\x{077F}'
+    if grep -rlP "[${cyrillic}${greek}${han}${hebrew}${arabic}]" \
         --include='*.md' --include='*.py' --include='*.sql' \
         --exclude-dir=.venv --exclude-dir=.git --exclude-dir=node_modules \
         --exclude-dir=i18n . ; then
