@@ -69,10 +69,12 @@ PRESENCE_MEDIA_AND_REPORTING = [
     "ReportProfilePhotoRequest",
 ]
 
-#: Marking anything read. Telethon does not do this on its own, and reading 100
-#: messages across several channels instantly is superhuman (SPEC-RCV-003).
+#: Marking anything read by hand. Telethon does not do this on its own, and
+#: reading 100 messages across several channels instantly is superhuman
+#: (SPEC-RCV-003). ``send_read_acknowledge`` is deliberately absent from this
+#: list and constrained by shape instead - see the test at the bottom of this
+#: file and ADR-0011.
 READ_RECEIPTS = [
-    "send_read_acknowledge",
     "ReadHistoryRequest",
     "ReadMentionsRequest",
     "ReadDiscussionRequest",
@@ -148,3 +150,33 @@ def test_contacts_are_imported_one_at_a_time():
             assert call.count("InputPhoneContact") == 1
             assert "for " not in call
             assert "*" not in call
+
+
+# --- Acknowledging a read is allowed on send only ------------------------
+
+
+def test_the_only_read_acknowledgment_is_in_the_send_path():
+    # send_read_acknowledge is not banned outright: tg_send_message uses it to
+    # mark a chat read *after* delivering into it, which is what a person who
+    # replies does. It is constrained by shape rather than by absence, the same
+    # way single-contact import is. A second call site is how this would decay
+    # back into marking things read while reading them (ADR-0011).
+    # The needle carries the opening parenthesis so this matches the *call* and
+    # not the prose explaining it, the same way the blacklist above matches
+    # request classes rather than docstrings.
+    hits = find_in_sources("send_read_acknowledge(")
+    assert len(hits) == 1, (
+        "send_read_acknowledge must be called exactly once in the shipped "
+        f"source, inside tg_send_message. Found {len(hits)}:\n  " + "\n  ".join(hits)
+    )
+    assert hits[0].startswith(
+        "server.py:"
+    ), f"the only read acknowledgment belongs in server.py's send path, not in {hits[0]}"
+
+
+def test_the_raw_read_history_requests_are_still_banned():
+    # The sanctioned helper picks channels.ReadHistory for a Channel and
+    # messages.ReadHistory otherwise. Reaching for the TL classes directly is
+    # how the user-versus-channel distinction gets hand-rolled and got wrong.
+    for name in ("ReadHistoryRequest", "ReadMentionsRequest"):
+        assert name in READ_RECEIPTS

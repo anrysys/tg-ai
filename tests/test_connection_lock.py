@@ -128,6 +128,7 @@ def test_the_lock_is_keyed_to_the_primary_session_never_the_clone():
         expected_username=None,
         database_url="postgresql://localhost/x",
         sync_include_bots=False,
+        read_on_send=False,
         device_model="Desktop",
         system_version="Linux 7.0",
         app_version="tg-ai 1.0",

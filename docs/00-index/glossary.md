@@ -3,7 +3,7 @@ id: DOC-GLOSSARY
 title: Glossary
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-ROUTER, DOC-SRS, DOC-DATA-MODEL]
 ---
 
@@ -29,6 +29,7 @@ function or document section `Chat`, `Conversation` or `Thread`.
 | **Sync** | The process of copying messages from the live account into the Archive. | `sync_db.py` |
 | **Sync Cursor** | `dialogs.last_synced_message_id` - the highest message id already archived for a Dialog. Advanced only after a commit, so it is always safe to resume from. | `db.advance_cursor` |
 | **Chunk** | One outgoing message produced by splitting a longer body under the 4096-character Telegram limit. | `safety.split_message` |
+| **Read Receipt** | The acknowledgment that turns the sender's single checkmark into two. Dispatched **only** after `tg_send_message` delivers into a Dialog, and only when `TG_READ_ON_SEND` is on. Never produced by reading, fetching or syncing. Never a "read mark" or "seen status". | `server.acknowledge_read` |
 | **Send Guard** | The pre-flight check that refuses to send: to a User with no shared history and no contact entry, to a Group the account has left, to a Channel without post rights, or to a Min Peer. | `server.tg_send_message` |
 | **Stranger** | A Peer with no message history and no contact entry. Messaging one is the primary ban vector. | `is_stranger` in `tg_send_message` |
 | **Peer Index** | The cached map of Peers the account already has Dialogs with, built from `GetDialogs`. Consulted before any cold username resolution. A hit is proof of membership, which is what makes it the authority for Groups and Channels. | `tg_client.PeerIndex` |

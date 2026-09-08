@@ -15,6 +15,7 @@ from tg_ai.safety import (
     SYNC_DIALOG_DELAY_SECONDS,
     describe_telegram_error,
     guarded_tool,
+    is_flood_error,
     jittered,
 )
 
@@ -228,3 +229,59 @@ def test_no_translated_message_suggests_joining_or_retrying_its_way_out():
         described = describe_telegram_error(build_error(name, **attributes)).lower()
         assert "try again immediately" not in described
         assert "join the channel" not in described
+
+
+# --- What counts toward the kill switch (SPEC-LIM-003) --------------------
+
+#: Ordinary permission and state errors. Every one of these was once counted as
+#: a flood, because is_flood_error returned describe_telegram_error's *message*
+#: for it and every message is truthy. Three in a rolling hour then tripped the
+#: 24-hour account-wide kill switch, from errors that say nothing about rate.
+NOT_FLOODS = [
+    ("ChatAdminRequiredError", {}),
+    ("ChannelPrivateError", {}),
+    ("ChannelInvalidError", {}),
+    ("ChatGuestSendForbiddenError", {}),
+    ("PhoneNumberBannedError", {}),
+    ("TakeoutInitDelayError", {"seconds": 3600}),
+    ("ApiIdPublishedFloodError", {}),
+    ("UserBannedInChannelError", {}),
+]
+
+#: The conditions SPEC-LIM-003 names, minus PeerFloodError, which is an
+#: escalation handled separately rather than one more point in a rolling count.
+REAL_FLOODS = [
+    ("FloodWaitError", {"seconds": 30}),
+    ("SlowModeWaitError", {"seconds": 30}),
+    ("FloodPremiumWaitError", {"seconds": 12}),
+]
+
+
+@pytest.mark.parametrize(("name", "attributes"), NOT_FLOODS)
+def test_a_permission_error_is_not_counted_as_a_flood(name, attributes):
+    assert is_flood_error(build_error(name, **attributes)) is False
+
+
+@pytest.mark.parametrize(("name", "attributes"), REAL_FLOODS)
+def test_a_real_flood_is_counted(name, attributes):
+    assert is_flood_error(build_error(name, **attributes)) is True
+
+
+def test_peer_flood_is_not_counted_because_it_is_handled_separately():
+    # It trips the switch indefinitely on its own path, so counting it here as
+    # well would be the same event recorded twice.
+    assert is_flood_error(build_error("PeerFloodError")) is False
+
+
+@pytest.mark.parametrize(
+    ("name", "attributes"), NOT_FLOODS + REAL_FLOODS + [("PeerFloodError", {})]
+)
+def test_is_flood_error_returns_a_real_boolean(name, attributes):
+    # The defect this guards against was invisible to every caller, because the
+    # one call site only asks whether the result is truthy. A returned message
+    # string passes that test and is wrong.
+    assert isinstance(is_flood_error(build_error(name, **attributes)), bool)
+
+
+def test_an_unrecognised_exception_is_not_a_flood():
+    assert is_flood_error(ValueError("something else")) is False

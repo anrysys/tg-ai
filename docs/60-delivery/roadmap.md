@@ -3,7 +3,7 @@ id: DOC-ROADMAP
 title: Roadmap
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-STATUS, DOC-TASK-QUEUE, DOC-PRD]
 ---
 
@@ -118,6 +118,21 @@ the pre-existing private-chat code
 | Personas disabled for groups and channels | ✅ `SPEC-PSN-009` |
 | Blacklisted operations, enforced by a source scan | ✅ `SPEC-LIM-006` |
 | Sustained live use over days, watching the flood log | ⬜ requires the user |
+
+## M8 - Stealth reading 🟨 code complete, live acceptance pending
+
+Reading never acknowledged anything and still does not; M8 proves that
+behaviourally and binds the one read receipt this project can emit to the send
+path ([ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md)).
+
+| Item | State |
+| --- | --- |
+| Audit: no acknowledgment on any ingestion, fetch or sync path | ✅ `SPEC-RCV-003` |
+| Read receipt after delivery, all three Peer Types | ✅ `SPEC-SND-009` |
+| Off by default, failing closed on an unreadable config | ✅ `SPEC-SEC-012` |
+| One call site, enforced by the source scan | ✅ `SPEC-LIM-006` |
+| `is_flood_error` counts only real floods | ✅ `SPEC-LIM-003`, `RISK-12` |
+| A live reply that marks exactly one chat read | ⬜ requires the user (TASK-017) |
 
 ## Beyond M5 - not scheduled
 

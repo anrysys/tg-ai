@@ -3,7 +3,7 @@ id: DOC-SRS
 title: Software requirements specification
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-PRD, DOC-SAD, DOC-MCP-TOOLS, DOC-QA, DOC-SECURITY]
 ---
 
@@ -195,6 +195,45 @@ Peer.
 which leaves `telegram()` unstubbed so that reaching it fails the test;
 `tests/test_group_rules.py` for the query shape and the schema comment.
 
+### SPEC-SND-009 - The read receipt is bound to sending
+
+**Requirement.** When `TG_READ_ON_SEND` is enabled, `tg_send_message` MUST mark
+the target Dialog read **after** delivering every chunk into it, for a User, a
+Group and a Channel alike. It MUST do so through Telethon's
+`send_read_acknowledge` and the Peer already resolved for the send, never by
+resolving the Target a second time and never through a raw `ReadHistory`
+request class.
+
+It MUST NOT acknowledge when the send was refused, when the send failed
+partway, or when the flag is off - which is its default (`SPEC-SEC-012`). A
+failure to acknowledge MUST NOT change the tool's result: the message is
+already delivered, so the failure is logged and swallowed, including a failure
+to read the setting itself.
+
+No other code path may acknowledge anything (`SPEC-RCV-003`), and
+`send_read_acknowledge` MUST appear in exactly one shipped file.
+
+**Rationale.** A person who replies to a chat has read it, and every official
+client marks it read before the reply is sent. Replying at length while the
+recipient's message keeps a single checkmark, permanently and account-wide, is
+a behavioural divergence nobody chose. Binding the acknowledgment to delivery
+rather than to fetching keeps the account owner's own unread badges honest -
+they still clear only when something was actually written - while removing the
+divergence. Acknowledging before delivery would make the receipt a side channel
+that reveals a send which did not happen.
+**Decided by.** [ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md).
+**Test.** `tests/test_server_limits.py` -
+`test_no_read_receipt_is_sent_by_default`,
+`test_a_successful_send_marks_the_chat_read`,
+`test_a_channel_send_marks_the_channel_read`,
+`test_a_group_send_marks_the_group_read`,
+`test_a_partial_send_does_not_mark_the_chat_read`,
+`test_a_refused_send_marks_nothing_read` and
+`test_a_failing_read_receipt_still_reports_the_send_as_successful`;
+`tests/test_blacklist.py::test_the_only_read_acknowledgment_is_in_the_send_path`
+for the single call site. Manual: reply to a chat and confirm the recipient's
+message shows two checkmarks.
+
 ---
 
 ## RCV - Reading the live account
@@ -219,9 +258,12 @@ agents to misattribute who said what.
 
 **Requirement.** `tg_get_unread_dialogs` MUST list only 1-on-1 Dialogs with
 non-deleted human users, and MUST exclude bots unless `TG_SYNC_INCLUDE_BOTS`
-is true. Reading MUST NOT mark anything as read: no code path may call
-`messages.readHistory`, `messages.readMentions`, `channels.readHistory` or
-Telethon's `send_read_acknowledge` (`SPEC-LIM-006`).
+is true. **Reading MUST NOT mark anything as read.** No read, fetch, sync or
+unread scan may acknowledge anything, whatever `TG_READ_ON_SEND` is set to: the
+raw `messages.readHistory`, `messages.readMentions` and `channels.readHistory`
+request classes are blacklisted outright (`SPEC-LIM-006`), and Telethon's
+`send_read_acknowledge` is reachable from exactly one place, the post-delivery
+path in `tg_send_message` (`SPEC-SND-009`).
 
 `tg_get_recent_messages` MAY read a Group or Channel the account is a member
 of, subject to all of:
@@ -239,7 +281,9 @@ to poll.
 
 **Rationale.** Marking messages read as a side effect of a status query would
 make the user's own Telegram client lie to them - and instantly "reading" 100
-messages across several channels is superhuman. The cooldown must be persisted
+messages across several channels is superhuman. That reasoning is about
+*reading* and is unaffected by ADR-0011, which acknowledges only after the
+account has itself written into a Dialog. The cooldown must be persisted
 because an MCP stdio server is respawned whenever the user reopens their
 editor, so an in-memory cooldown is cleared by the very restart an agent in a
 loop is most likely to cause. The numbers are in the docstring because the
@@ -248,8 +292,11 @@ caller is a model that will otherwise retry rather than stop.
 **Test.** `tests/test_server_limits.py` - in particular
 `test_the_cooldown_survives_a_process_restart` and
 `test_the_daily_cap_refuses_once_it_is_used_up`; `tests/test_blacklist.py` for
-the read-receipt ban. Manual: unread badges in the Telegram app are unchanged
-after calling.
+the ban on the raw request classes; and
+`tests/test_server_limits.py::test_reading_messages_marks_nothing_read`, which
+calls the tool with `TG_READ_ON_SEND` deliberately **on** against a client that
+raises if acknowledgment is reached. Manual: unread badges in the Telegram app
+are unchanged after calling.
 
 ### SPEC-RCV-005 - One bounded dialog fetch, shared
 
@@ -856,6 +903,26 @@ than a comment.
 decides nothing new.
 **Test.** `tests/test_server_shutdown.py`.
 
+### SPEC-SEC-012 - Read receipts are opt-in
+
+**Requirement.** `TG_READ_ON_SEND` MUST default to `false`, so a freshly
+installed server acknowledges nothing. When it is unset, malformed or the
+configuration cannot be read at all, the effective behaviour MUST be "do not
+acknowledge". It governs the send path only and MUST NOT enable acknowledgment
+anywhere else (`SPEC-RCV-003`).
+
+**Rationale.** A read receipt is visible to the other person and cannot be
+withdrawn, and this project drives an account whose owner may not want their
+correspondents to know when a chat was opened. Every other default in this
+project fails toward doing less to the account; this one does too. Failing
+closed on an unreadable configuration matters because the alternative is a
+receipt sent because something was broken.
+**Decided by.** [ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md).
+**Test.** `tests/test_config.py::test_read_on_send_is_off_unless_the_account_owner_turns_it_on`
+and `::test_read_on_send_is_enabled_by_the_usual_truthy_spellings`;
+`tests/test_server_limits.py::test_no_read_receipt_is_sent_by_default` for the
+end-to-end default.
+
 ---
 
 ## LIM - Pacing, budgets and the kill switch
@@ -927,7 +994,14 @@ resolved defensively and also matched by its wire string - a flood that went
 uncounted would be a blind spot in the one control that must not have one.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
 **Test.** `tests/test_rpc_guard.py::test_three_flood_waits_in_an_hour_trip_the_switch`
-and `::test_peer_flood_trips_the_switch_indefinitely`.
+and `::test_peer_flood_trips_the_switch_indefinitely`. What must *not* be
+counted is proved by `tests/test_safety.py` -
+`test_a_permission_error_is_not_counted_as_a_flood`,
+`test_a_real_flood_is_counted` and `test_is_flood_error_returns_a_real_boolean`.
+The last of those exists because `is_flood_error` once returned
+`describe_telegram_error`'s *message* for eight other conditions; every message
+is truthy, so ordinary permission errors were recorded as floods and three in an
+hour tripped this switch.
 
 ### SPEC-LIM-004 - The quiet window
 
@@ -971,13 +1045,24 @@ leaving, bulk contact import, bulk forwarding, the peer-harvesting family
 download, channel statistics and every reporting method. A request for one MUST
 return a `ToolError` explaining that it is blocked to protect the account.
 
+The `ReadHistoryRequest`, `ReadMentionsRequest`, `ReadDiscussionRequest` and
+`ReadMessageContentsRequest` classes are on that list and stay there.
+Telethon's `send_read_acknowledge` is **not**, since ADR-0011; it is
+constrained by shape instead, exactly as single-contact `ImportContacts` is -
+it must appear in exactly one shipped file, in the send path (`SPEC-SND-009`).
+Banning the request classes while permitting the helper is what forces the
+Channel-versus-User distinction to be read off the entity by Telethon rather
+than hand-rolled here.
+
 **Rationale.** These are the operations that get userbot scripts deactivated.
 Banning member-list scraping achieves nothing if the same data is assembled one
 message at a time, so the harvesting back door is closed with it: doing it one
 id at a time is the same thing, slower.
 **Decided by.** [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
 **Test.** `tests/test_blacklist.py`, which scans the shipped source for every
-name.
+name, plus `test_the_only_read_acknowledgment_is_in_the_send_path` and
+`test_the_raw_read_history_requests_are_still_banned` for the one shape-
+constrained exception.
 
 ### SPEC-LIM-007 - A per-process ceiling on Telegram-touching tool calls
 

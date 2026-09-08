@@ -7,9 +7,11 @@ ever touched.
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
-from telethon.tl.types import Channel, User
+from telethon import errors
+from telethon.tl.types import Channel, ChatAdminRights, User
 
 import server
 from tg_ai import db
@@ -239,13 +241,23 @@ class SendRecordingClient:
 
     def __init__(self, me_id: int = 1) -> None:
         self.sent: list[tuple[object, str]] = []
+        self.read_acks: list[object] = []
+        self.fail_send_after: int | None = None
+        self.fail_read_ack = False
         self._me = User(id=me_id, first_name="Me", bot=False, deleted=False)
 
     async def get_me(self):
         return self._me
 
     async def send_message(self, peer, text):
+        if self.fail_send_after is not None and len(self.sent) >= self.fail_send_after:
+            raise errors.ChatWriteForbiddenError(request=None)
         self.sent.append((peer, text))
+
+    async def send_read_acknowledge(self, peer):
+        if self.fail_read_ack:
+            raise errors.ChatAdminRequiredError(request=None)
+        self.read_acks.append(peer)
 
 
 class StubIndex:
@@ -255,10 +267,16 @@ class StubIndex:
 
 @pytest.fixture
 def sending(monkeypatch):
-    """Wire tg_send_message to a stub client that resolves to ``peer``."""
+    """Wire tg_send_message to a stub client that resolves to ``peer``.
+
+    ``target(peer, read_on_send=...)`` also fixes the TG_READ_ON_SEND setting,
+    because server.config() would otherwise read the developer's environment.
+    """
     client = SendRecordingClient()
 
-    def target(peer):
+    def target(peer, *, read_on_send: bool = False):
+        monkeypatch.setattr(server, "config", lambda: SimpleNamespace(read_on_send=read_on_send))
+
         async def fake_telegram():
             return client, StubIndex()
 
@@ -351,3 +369,167 @@ async def test_a_peer_seen_only_in_a_group_is_refused_before_connecting(monkeypa
     assert result.startswith("ERROR: ")
     assert "only ever seen writing inside a group" in result
     assert "nothing was requested from telegram" in result.lower()
+
+
+# --- The read receipt is bound to sending (SPEC-SND-009, ADR-0011) --------
+
+
+def posting_rights() -> ChatAdminRights:
+    """Channel admin rights that permit posting and nothing else."""
+    fields = (
+        "change_info",
+        "post_messages",
+        "edit_messages",
+        "delete_messages",
+        "ban_users",
+        "invite_users",
+        "pin_messages",
+        "add_admins",
+    )
+    return ChatAdminRights(**{name: name == "post_messages" for name in fields})
+
+
+def known_user(**kwargs) -> User:
+    """A User the Send Guard lets through: resolve_peer reports known_locally."""
+    defaults = {"id": 500, "first_name": "Sam", "bot": False, "deleted": False}
+    return User(**{**defaults, **kwargs})
+
+
+async def test_no_read_receipt_is_sent_by_default(sending):
+    # TG_READ_ON_SEND is off unless the account owner turns it on, so the
+    # shipped default leaves the sender's single checkmark alone.
+    client = sending(known_user())
+
+    result = await server.tg_send_message("Sam", "hello")
+
+    assert result.startswith("Sent to ")
+    assert client.sent
+    assert client.read_acks == []
+
+
+async def test_a_successful_send_marks_the_chat_read(sending):
+    client = sending(known_user(), read_on_send=True)
+
+    result = await server.tg_send_message("Sam", "hello")
+
+    assert result.startswith("Sent to ")
+    assert len(client.read_acks) == 1
+
+
+async def test_a_channel_send_marks_the_channel_read(sending):
+    # send_read_acknowledge picks channels.ReadHistory from the entity, so the
+    # channel case needs no branch of ours - but it must still be reached.
+    peer = channel(admin_rights=posting_rights())
+    client = sending(peer, read_on_send=True)
+
+    result = await server.tg_send_message("News", "hello")
+
+    assert result.startswith("Sent to ")
+    assert client.read_acks == [peer]
+
+
+async def test_a_group_send_marks_the_group_read(sending):
+    peer = supergroup()
+    client = sending(peer, read_on_send=True)
+
+    await server.tg_send_message("Team", "hello")
+
+    assert client.read_acks == [peer]
+
+
+async def test_a_partial_send_does_not_mark_the_chat_read(sending, monkeypatch):
+    # A send that failed partway is not a read conversation, and the failure
+    # must still reach the agent (SPEC-SND-005).
+    client = sending(known_user(), read_on_send=True)
+    client.fail_send_after = 1
+
+    # The real 2.5s chunk gap is proved elsewhere; paying it here would make the
+    # offline suite slower without proving anything about read receipts.
+    async def no_delay():
+        return None
+
+    monkeypatch.setattr(server, "sleep_between_chunks", no_delay)
+
+    result = await server.tg_send_message("Sam", "x" * 9000)
+
+    assert result.startswith("ERROR: ")
+    assert len(client.sent) == 1
+    assert client.read_acks == []
+
+
+async def test_a_refused_send_marks_nothing_read(sending):
+    # The guard fires before anything is delivered, so there is nothing to have
+    # read. This is also what keeps the receipt from becoming a side channel
+    # that reveals a refused send.
+    client = sending(channel(left=False), read_on_send=True)
+
+    result = await server.tg_send_message("News", "hello")
+
+    assert result.startswith("ERROR: ")
+    assert client.sent == []
+    assert client.read_acks == []
+
+
+async def test_a_failing_read_receipt_still_reports_the_send_as_successful(sending):
+    # The message is already delivered. Reporting ERROR: here would invite the
+    # agent to send it a second time, which is the worst outcome available.
+    client = sending(known_user(), read_on_send=True)
+    client.fail_read_ack = True
+
+    result = await server.tg_send_message("Sam", "hello")
+
+    assert result.startswith("Sent to ")
+    assert len(client.sent) == 1
+    assert client.read_acks == []
+
+
+# --- Reading still acknowledges nothing (SPEC-RCV-003) -------------------
+
+
+class ReadingClient:
+    """A client whose read acknowledgment fails loudly if it is ever reached.
+
+    Modelled on ForbiddenClient in test_group_rules.py: the method records
+    itself and then raises, so the test fails whether it inspects the recording
+    or merely runs.
+    """
+
+    def __init__(self) -> None:
+        self.acknowledged = False
+
+    async def get_messages(self, peer, limit=None):
+        return []
+
+    async def send_read_acknowledge(self, peer):
+        self.acknowledged = True
+        raise AssertionError(
+            "tg_get_recent_messages marked a chat read. Reading is "
+            "non-destructive; only sending may acknowledge (SPEC-RCV-003)."
+        )
+
+
+async def test_reading_messages_marks_nothing_read(monkeypatch):
+    # The flag is deliberately ON. TG_READ_ON_SEND governs the send path only,
+    # so turning it on must not leak a receipt into any read path - that is the
+    # whole distinction ADR-0011 rests on.
+    client = ReadingClient()
+    peer = known_user()
+
+    async def fake_telegram():
+        return client, StubIndex()
+
+    async def fake_resolve(_client, _index, _target, *, allow=None):
+        return peer, True
+
+    async def no_persona(chat_id, label):
+        return ""
+
+    monkeypatch.setattr(server, "telegram", fake_telegram)
+    monkeypatch.setattr(server, "resolve_peer", fake_resolve)
+    monkeypatch.setattr(server, "persona_header_for", no_persona)
+    monkeypatch.setattr(server, "config", lambda: SimpleNamespace(read_on_send=True))
+
+    result = await server.tg_get_recent_messages("Sam")
+
+    assert not result.startswith("ERROR: "), result
+    assert client.acknowledged is False

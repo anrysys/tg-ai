@@ -3,7 +3,7 @@ id: DOC-PRD
 title: Product requirements
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-SRS, DOC-ROADMAP]
 ---
 
@@ -84,7 +84,11 @@ Explicitly out of scope. Adding any of these requires a PRD change and an ADR.
 - **Media.** Only message text is archived and sent. No photos, files or voice.
 - **Deleting or editing messages.** The server never destroys anything on the
   account.
-- **Marking messages read.** Reading is strictly non-destructive.
+- **Marking messages read while reading.** Reading is strictly
+  non-destructive: no fetch, search, sync or unread scan ever clears a badge
+  or turns a sender's single checkmark into two. Replying is the one thing
+  that does, and only when `TG_READ_ON_SEND` is enabled - it is off by
+  default ([ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md)).
 - **Multiple accounts.** One session, one archive.
 - **Remote access.** No HTTP transport, no hosted deployment, no shared database.
 - **Bulk or broadcast messaging.** The tool sends to one Peer at a time by

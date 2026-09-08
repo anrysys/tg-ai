@@ -30,5 +30,6 @@ from the [ID registry](../../00-index/id-registry.md).
 | [0006](0006-raw-sql-asyncpg-no-orm.md) | Raw SQL over asyncpg, no ORM | Accepted |
 | [0007](0007-documentation-governance.md) | Documentation is part of the implementation | Accepted |
 | [0008](0008-dialog-persona-hybrid-authorship.md) | Dialog Persona: hybrid authorship, own table, frozen baseline | Accepted |
-| [0009](0009-groups-and-channels.md) | Groups and channels, behind a safety envelope | Accepted |
+| [0009](0009-groups-and-channels.md) | Groups and channels, behind a safety envelope | Accepted (read-receipt consequence superseded by 0011) |
 | [0010](0010-one-connection-per-authorization-key.md) | One connection per authorization key | Accepted |
+| [0011](0011-read-receipt-on-send.md) | Bind the read receipt to sending, and to nothing else | Accepted |

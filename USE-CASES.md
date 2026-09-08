@@ -154,7 +154,13 @@ Opening Telegram to check one thing costs you the next forty minutes. These
 prompts answer the question without opening the door.
 
 **Reading never marks anything as read.** Your unread badges stay exactly where
-they were, so nobody sees a blue tick you did not intend to send.
+they were, so nobody sees a blue tick you did not intend to send. Every prompt
+in this section is a read, so none of them is visible to anyone.
+
+The one thing that can mark a chat read is *replying* to it, and only if you
+turn on `TG_READ_ON_SEND` - which is off unless you set it. Then a delivered
+reply marks that one chat read, exactly as opening it on your phone to answer
+would.
 
 ### 2.1 The deep-work exit
 
@@ -504,7 +510,8 @@ Stated plainly, because a tool that oversells itself wastes your time:
 - **No media.** Only message text is archived and sent - no photos, files or
   voice notes.
 - **It never deletes or edits** anything on your account, and reading never marks
-  a chat as read.
+  a chat as read. Replying can, if you set `TG_READ_ON_SEND=true` - off unless
+  you do.
 - **No bulk or broadcast sending.** One recipient at a time, by design. A batch
   send would defeat every anti-spam guarantee in the project.
 - **No messaging strangers.** No history and not a contact means nothing is sent.

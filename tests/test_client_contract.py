@@ -48,6 +48,7 @@ def make_config(**overrides) -> Config:
         "expected_username": None,
         "database_url": "postgresql://localhost/x",
         "sync_include_bots": False,
+        "read_on_send": False,
         "device_model": "Desktop",
         "system_version": "Linux 7.0",
         "app_version": "tg-ai 1.0",

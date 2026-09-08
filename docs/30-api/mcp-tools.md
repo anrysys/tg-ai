@@ -3,7 +3,7 @@ id: DOC-MCP-TOOLS
 title: MCP tool contract
 status: active
 authority: derived
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-SRS, DOC-ROUTER]
 ---
 
@@ -22,7 +22,7 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
 ```json
 {
   "tg_send_message": {
-    "description": "Send a Telegram message from the user's own account.",
+    "description": "Send a Telegram message from the user's own account. Marks that chat read afterwards when TG_READ_ON_SEND is enabled.",
     "required": ["target", "message"],
     "properties": {
       "target":  {"type": "string", "description": "@username, +phone, numeric id, 'me', or a group/channel title"},
@@ -119,6 +119,26 @@ member of**, named by its title, `@username` or numeric id.
 
 The reasoning is in
 [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+
+## Read receipts
+
+**Reading never marks anything as read.** `tg_get_recent_messages`,
+`tg_get_unread_dialogs`, `tg_search_local_history` and every sync leave the
+sender's single checkmark alone and leave the owner's unread badges where they
+are. Fetch as much of a conversation as you need; none of it is visible to
+anyone.
+
+Replying is the only thing that acknowledges, and only when the account owner
+has set `TG_READ_ON_SEND=true`. When they have, `tg_send_message` marks that
+one chat read *after* delivering - the same order a person's own client uses
+when they open a chat to answer it. It applies to people, groups and channels
+alike, never happens for a refused or partly-failed send, and a failure to mark
+it read never fails the send or changes what the tool returns.
+
+There is no per-call parameter for this and there will not be one: the
+distinction is which pipeline the call lives in, not which argument was passed
+(`SPEC-SND-009`,
+[ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md)).
 
 ## Choosing the right tool
 

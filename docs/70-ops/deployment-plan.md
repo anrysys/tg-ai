@@ -3,7 +3,7 @@ id: DOC-DEPLOY
 title: Deployment plan
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-SAD, DOC-SECURITY, DOC-RUNBOOK-INDEX]
 ---
 
@@ -47,6 +47,15 @@ anyone whose app is in another language: every connection reports it, alongside
 a phone number and an `api_id` Telegram has already seen used from the official
 app for years, so a mismatch is a contradiction in Telegram's own records
 (`SPEC-SEC-007`).
+
+**`TG_READ_ON_SEND`** is the one setting that changes what other people see,
+and it is off. Reading never marks anything as read whatever it is set to;
+turning it on means that *after* a reply is delivered, that one chat is marked
+read - which is what the official app does when the owner opens a chat to
+answer it. Off, nothing this project does ever turns a sender's single
+checkmark into two. A receipt cannot be withdrawn, so this stays the account
+owner's decision, and enabling it costs one extra API request per send against
+the 60/hour budget (`SPEC-SEC-012`, `SPEC-SND-009`).
 
 Everything else has a working default. `TG_TIMEZONE` is detected from the
 machine, and `TG_QUIET_HOURS` defaults to `01:00-08:00` local, during which

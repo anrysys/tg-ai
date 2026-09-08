@@ -3,7 +3,7 @@ id: DOC-TASK-QUEUE
 title: Task queue
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-ROADMAP, DOC-STATUS]
 ---
 
@@ -23,6 +23,7 @@ record that the question was already settled.
 | TASK-013 | `db.rebaseline_persona` and `_REBASELINE_PERSONA_SQL` have zero call sites, so a Persona Baseline can never move once created. Either wire it up behind an explicit tool argument or delete it | Nothing. Decide which |
 | TASK-014 | Set `TG_LANG_CODE` in `.env` to the interface language of the Telegram app on the account owner's phone. It defaults to `en`, which is correct for a public repository and wrong for most individual users (`SPEC-SEC-007`) | The user: only they know what their app is set to |
 | TASK-015 | Run the project for several days and check `api_flood_log` stays empty. The pacing constants are reasoned, not measured; the flood log is the only evidence that they are right | Time, and ordinary use |
+| TASK-017 | Verify the read receipt against the real account: with `TG_READ_ON_SEND=true`, one reply should add exactly one `ReadHistory` to `api_call_log` **after** the send and clear that chat's badge; a read with the same flag on should add none (`SPEC-SND-009`) | TASK-007: no message has ever been sent from this account |
 | TASK-016 | Decide whether `server.py` should handle SIGTERM. `SPEC-SEC-011` covers stdin EOF and SIGINT; a `kill` still terminates with no async teardown, leaving a `.session-journal` behind. The kernel drops the `flock` either way, so this is tidiness rather than safety, and it costs a signal handler installed and removed inside the lifespan | Nothing. Decide whether the tidiness is worth the handler |
 
 ## Open questions

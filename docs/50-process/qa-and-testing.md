@@ -3,7 +3,7 @@ id: DOC-QA
 title: QA and testing
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-SRS, DOC-DOCS-PROTOCOL]
 ---
 
@@ -23,9 +23,9 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | Area | File | Proves |
 | --- | --- | --- |
 | Chunking | `tests/test_chunking.py` | `SPEC-SND-002` - limits, boundaries, no broken words, unicode |
-| Error handling | `tests/test_safety.py` | `SPEC-SND-003`, `SPEC-SND-004` - pacing constant, never-raise, exact flood-wait wording |
+| Error handling | `tests/test_safety.py` | `SPEC-SND-003`, `SPEC-SND-004`, `SPEC-LIM-003` - pacing constant, never-raise, exact flood-wait wording, and what does *not* count toward the kill switch |
 | Search SQL | `tests/test_search_sql.py` | `SPEC-SRCH-002`, `-003`, `-004` - strategies, `simple`, bound parameters |
-| Configuration | `tests/test_config.py` | `SPEC-SEC-003`, `SPEC-SEC-004` - validation, path rejection, clone naming |
+| Configuration | `tests/test_config.py` | `SPEC-SEC-003`, `SPEC-SEC-004`, `SPEC-SEC-012` - validation, path rejection, clone naming, read receipts off by default |
 | Peer filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-001` - who is archived, Peer Types, posting rights, target normalisation, the contacts hash |
 | Target filtering | `tests/test_peer_rules.py` | `SPEC-SYNC-006` - exact matching, dialog ordering, unmatched reporting |
 | Style measurement | `tests/test_persona_metrics.py` | `SPEC-PSN-002`, `SPEC-PSN-003`, `SPEC-PSN-005` - totality over empty input, distributions not means, no message text in any metric, the three freshness axes |
@@ -37,8 +37,8 @@ PostgreSQL. `just py-test` must pass on a machine with no credentials at all.
 | RPC limiter | `tests/test_rpc_guard.py` | `SPEC-LIM-001` .. `SPEC-LIM-004` - pacing, re-entrancy without deadlock, budgets surviving a restart, the kill switch, failing closed |
 | Safety SQL | `tests/test_rpc_sql.py` | `SPEC-LIM-002`, `SPEC-LIM-003` - rolling windows not calendar buckets, indexed timestamps, idempotent schema |
 | Peer resolution | `tests/test_group_rules.py` | `SPEC-SND-006`, `SPEC-SYNC-007` - a Group not in the Peer Index is refused **with the client asserted never called**; the volume caps pinned as values |
-| Blacklist | `tests/test_blacklist.py` | `SPEC-LIM-006` - 50 forbidden identifiers absent from the shipped source |
-| Server limits | `tests/test_server_limits.py` | `SPEC-LIM-007`, `SPEC-RCV-003`, `SPEC-SND-001`, `SPEC-SND-007`, `SPEC-SND-008`, `SPEC-PSN-009` - the per-process ceiling, the group cooldown and daily cap across a simulated restart, the Group and Channel send guard, and Persona isolation |
+| Blacklist | `tests/test_blacklist.py` | `SPEC-LIM-006`, `SPEC-SND-009` - 46 forbidden identifiers absent from the shipped source, plus the two shape-constrained exceptions: single-contact import, and one read acknowledgment in the send path |
+| Server limits | `tests/test_server_limits.py` | `SPEC-LIM-007`, `SPEC-RCV-003`, `SPEC-SND-001`, `SPEC-SND-007`, `SPEC-SND-008`, `SPEC-SND-009`, `SPEC-PSN-009` - the per-process ceiling, the group cooldown and daily cap across a simulated restart, the Group and Channel send guard, the read receipt bound to delivery, and Persona isolation |
 
 ### On "coverage"
 
@@ -71,6 +71,10 @@ These need a live account and are verified by hand. Record the result in
 | The connection lock holds | `just tg-sync` while `just tg-serve` runs | The sync exits 1, naming the other process, and creates no clone |
 | Flood accumulation is visible | `just tg-status` after a busy day | Reports the remaining hourly and daily budget, and the kill switch |
 | Reading is non-destructive | `tg_get_unread_dialogs`, then check the app | Unread badges unchanged |
+| Reading is non-destructive with receipts ON | Set `TG_READ_ON_SEND=true`, restart, `tg_get_recent_messages` on an unread chat, then `SELECT key FROM api_call_log ORDER BY called_at DESC LIMIT 5` | Badge unchanged and no `ReadHistoryRequest` row - the flag governs the send path only (`SPEC-RCV-003`) |
+| A reply marks the chat read | With `TG_READ_ON_SEND=true`, reply to a chat that has an unread message | The sender sees two checkmarks, the badge clears, and `api_call_log` gains exactly one `ReadHistoryRequest` row, ordered **after** the `SendMessageRequest` |
+| Sending marks nothing read by default | With `TG_READ_ON_SEND` unset, send a message | The recipient keeps one checkmark and `api_call_log` shows no `ReadHistoryRequest` (`SPEC-SEC-012`) |
+| A refused send acknowledges nothing | With receipts on, `tg_send_message` to a channel you only subscribe to | `ERROR`, and no `ReadHistoryRequest` row - a receipt never reveals a send that did not happen |
 | A Persona survives a resync | Store one, then `just tg-sync` | `tg_get_dialog_persona` still returns it (`SPEC-PSN-001`) |
 | A Persona cannot model itself | Draft and send ~20 replies, sync, re-read | `baseline_message_id` and `analysed_count` unchanged; the metrics still describe the user (`SPEC-PSN-003`) |
 | A dead archive cannot break a live read | `just db-down`, then `tg_get_recent_messages` | The conversation still returns, with `PERSONA: unavailable` (`SPEC-PSN-007`) |

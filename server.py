@@ -494,6 +494,41 @@ async def persona_hint(chat_id: int, label: str) -> str:
         return ""
 
 
+async def acknowledge_read(client: TelegramClient, peer: object, label: str) -> None:
+    """Mark a Dialog read after the account has written into it (SPEC-SND-009).
+
+    This is the **only** sanctioned read acknowledgment in the project. Every
+    read path stays stealth: reading a Dialog leaves the sender's single
+    checkmark alone, and only a reply turns it into two. A person who replies
+    has read the chat, so leaving it unread is the anomaly this removes
+    (ADR-0011).
+
+    Off unless ``TG_READ_ON_SEND`` is set, and reached only once every chunk is
+    delivered. Swallowing every failure is mandatory here for the same reason it
+    is in ``persona_hint``: the message is already delivered, so letting this
+    raise would report ``ERROR:`` for a send that succeeded and invite the agent
+    to send it twice. The bare except is the purpose of this function, not an
+    oversight.
+
+    ``send_read_acknowledge`` picks ``channels.ReadHistory`` for a Channel and
+    ``messages.ReadHistory`` otherwise, from the entity itself, so the
+    user-versus-channel case is the library's to get right rather than ours. It
+    is called with no ``max_id``, which marks the history read exactly as
+    opening the chat in the app does - a hand-computed ceiling would need
+    another request and would have to reason about per-Dialog message id spaces.
+    """
+    try:
+        # The flag is read inside the try on purpose. config() raises ToolError
+        # on a malformed environment, and by this line the message is already
+        # delivered - so even reading the setting must not be able to turn a
+        # successful send into an ERROR:.
+        if not config().read_on_send:
+            return
+        await client.send_read_acknowledge(peer)
+    except Exception as exc:  # noqa: BLE001 - the message is already sent
+        log.warning("read receipt for %s skipped: %s", label, exc)
+
+
 # --------------------------------------------------------------------------
 # Tools
 # --------------------------------------------------------------------------
@@ -515,6 +550,12 @@ async def tg_send_message(target: str, message: str) -> str:
     Telegram. A message that would need splitting is refused outright for a
     group or channel - several messages in a row is a long reply in a DM and
     flooding in a group - so shorten it instead.
+
+    Reading a chat never marks it read, so the other person keeps seeing one
+    checkmark no matter how much of the conversation you fetch. When
+    TG_READ_ON_SEND is enabled, delivering a message marks that one chat read
+    afterwards - so a reply is the only thing that ever produces a read
+    receipt, and a failure to mark it read never fails the send.
 
     Before composing a reply in an ongoing conversation, call
     tg_get_dialog_persona(target) so the draft matches how the user actually
@@ -632,6 +673,12 @@ async def tg_send_message(target: str, message: str) -> str:
         if sent:
             log.warning("partial send to %s: %d/%d chunks", label, sent, len(chunks))
         raise
+
+    # Every chunk is delivered, so the account has genuinely written here and
+    # the Dialog is genuinely read. Deliberately placed before the group and
+    # channel return so all three Peer Types acknowledge, and after the send
+    # loop so a partial send acknowledges nothing (SPEC-SND-009, ADR-0011).
+    await acknowledge_read(client, peer, label)
 
     if kind != PEER_TYPE_USER:
         return f"Sent to {label} ({kind}, {len(body)} characters)."

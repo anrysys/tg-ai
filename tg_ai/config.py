@@ -58,6 +58,12 @@ class Config:
     database_url: str
     sync_include_bots: bool
 
+    # --- Read receipts (ADR-0011) ----------------------------------------
+    # Off by default. Reading never acknowledges anything; when this is on,
+    # tg_send_message marks the Dialog read *after* delivering, because a
+    # person who replies has read the chat (SPEC-SND-009, SPEC-SEC-012).
+    read_on_send: bool
+
     # --- Client Identity (ADR-0009) --------------------------------------
     # Replayed in initConnection on every reconnection. Treat as immutable
     # once a session exists: changing them makes the account's own "active
@@ -272,6 +278,7 @@ def load_config(*, require_telegram: bool = True) -> Config:
         expected_username=expected or None,
         database_url=database_url,
         sync_include_bots=_env_flag("TG_SYNC_INCLUDE_BOTS", default=False),
+        read_on_send=_env_flag("TG_READ_ON_SEND", default=False),
         device_model=os.environ.get("TG_DEVICE_MODEL", "").strip() or DEFAULT_DEVICE_MODEL,
         system_version=(
             os.environ.get("TG_SYSTEM_VERSION", "").strip() or _default_system_version()

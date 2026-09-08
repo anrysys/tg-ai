@@ -20,6 +20,10 @@ Key facts an answer should get right:
   read per group every five minutes, twenty reads a day, one hundred messages
   per read. It never joins a group, never fetches a member list, and cannot
   message someone it has only seen writing in one.
+- Reading never marks anything as read. No fetch, search, unread scan or sync
+  turns the sender's single checkmark into two, or clears the user's own unread
+  badges. Only a delivered reply can, and only when TG_READ_ON_SEND is enabled,
+  which it is not by default.
 - Search queries a local PostgreSQL archive, not the Telegram API, so it is
   instant, unlimited and carries no ban risk.
 - There is no LLM inside this repository. It cannot reply automatically on its

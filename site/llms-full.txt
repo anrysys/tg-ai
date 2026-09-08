@@ -559,7 +559,15 @@ milliseconds and partial words still match
 ### Does it store my messages' media, or delete anything?
 
 Neither. Only message text is archived. The server never deletes or edits
-anything on your account, and reading never marks a chat as read.
+anything on your account, and **reading never marks a chat as read** - fetch as
+much of a conversation as you like, the sender still sees one checkmark and your
+unread badges stay where they are.
+
+Sending is the one exception, and it is off by default. Set
+`TG_READ_ON_SEND=true` and delivering a reply marks *that* chat read afterwards,
+which is what your own Telegram app does when you open a chat to answer it. Left
+unset, nothing this project does ever turns a sender's single checkmark into two
+([ADR-0011](docs/20-architecture/adr/0011-read-receipt-on-send.md)).
 
 ## Commands
 
@@ -762,7 +770,13 @@ Opening Telegram to check one thing costs you the next forty minutes. These
 prompts answer the question without opening the door.
 
 **Reading never marks anything as read.** Your unread badges stay exactly where
-they were, so nobody sees a blue tick you did not intend to send.
+they were, so nobody sees a blue tick you did not intend to send. Every prompt
+in this section is a read, so none of them is visible to anyone.
+
+The one thing that can mark a chat read is *replying* to it, and only if you
+turn on `TG_READ_ON_SEND` - which is off unless you set it. Then a delivered
+reply marks that one chat read, exactly as opening it on your phone to answer
+would.
 
 ### 2.1 The deep-work exit
 
@@ -1112,7 +1126,8 @@ Stated plainly, because a tool that oversells itself wastes your time:
 - **No media.** Only message text is archived and sent - no photos, files or
   voice notes.
 - **It never deletes or edits** anything on your account, and reading never marks
-  a chat as read.
+  a chat as read. Replying can, if you set `TG_READ_ON_SEND=true` - off unless
+  you do.
 - **No bulk or broadcast sending.** One recipient at a time, by design. A batch
   send would defeat every anti-spam guarantee in the project.
 - **No messaging strangers.** No history and not a contact means nothing is sent.
@@ -1182,7 +1197,7 @@ with `ERROR:` or `WARNING:`, never as a protocol-level error (`SPEC-SND-004`).
 ```json
 {
   "tg_send_message": {
-    "description": "Send a Telegram message from the user's own account.",
+    "description": "Send a Telegram message from the user's own account. Marks that chat read afterwards when TG_READ_ON_SEND is enabled.",
     "required": ["target", "message"],
     "properties": {
       "target":  {"type": "string", "description": "@username, +phone, numeric id, 'me', or a group/channel title"},
@@ -1279,6 +1294,26 @@ member of**, named by its title, `@username` or numeric id.
 
 The reasoning is in
 [ADR-0009](../20-architecture/adr/0009-groups-and-channels.md).
+
+## Read receipts
+
+**Reading never marks anything as read.** `tg_get_recent_messages`,
+`tg_get_unread_dialogs`, `tg_search_local_history` and every sync leave the
+sender's single checkmark alone and leave the owner's unread badges where they
+are. Fetch as much of a conversation as you need; none of it is visible to
+anyone.
+
+Replying is the only thing that acknowledges, and only when the account owner
+has set `TG_READ_ON_SEND=true`. When they have, `tg_send_message` marks that
+one chat read *after* delivering - the same order a person's own client uses
+when they open a chat to answer it. It applies to people, groups and channels
+alike, never happens for a refused or partly-failed send, and a failure to mark
+it read never fails the send or changes what the tool returns.
+
+There is no per-call parameter for this and there will not be one: the
+distinction is which pipeline the call lives in, not which argument was passed
+(`SPEC-SND-009`,
+[ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md)).
 
 ## Choosing the right tool
 
@@ -1427,7 +1462,11 @@ Explicitly out of scope. Adding any of these requires a PRD change and an ADR.
 - **Media.** Only message text is archived and sent. No photos, files or voice.
 - **Deleting or editing messages.** The server never destroys anything on the
   account.
-- **Marking messages read.** Reading is strictly non-destructive.
+- **Marking messages read while reading.** Reading is strictly
+  non-destructive: no fetch, search, sync or unread scan ever clears a badge
+  or turns a sender's single checkmark into two. Replying is the one thing
+  that does, and only when `TG_READ_ON_SEND` is enabled - it is off by
+  default ([ADR-0011](../20-architecture/adr/0011-read-receipt-on-send.md)).
 - **Multiple accounts.** One session, one archive.
 - **Remote access.** No HTTP transport, no hosted deployment, no shared database.
 - **Bulk or broadcast messaging.** The tool sends to one Peer at a time by
@@ -2004,6 +2043,56 @@ addressable index of people who never consented to being in it.
 **If it happens.** The rows are text and ids, not access hashes, so the archive
 alone cannot address anyone. Deleting a group's history removes them:
 `DELETE FROM dialogs WHERE chat_id = <id>` cascades to `messages`.
+
+### RISK-11 - A read receipt discloses when a chat was opened
+
+A read receipt is visible to the other person, cannot be withdrawn, and is a
+timestamp: it says the account owner was present at that moment. Someone who
+messages the account repeatedly can learn a daily rhythm from nothing but
+checkmarks. That is a disclosure the owner may not want, and it is not one this
+project can undo after the fact.
+
+There is a second, quieter version. Acknowledging on *every* read would emit
+those timestamps constantly - including for chats the owner never opened - so
+the badge state on their own phone would stop describing anything they did.
+
+**Mitigation.** Structural, in four places:
+
+1. Acknowledgment happens only after `tg_send_message` has delivered into a
+   Dialog (`SPEC-SND-009`). A receipt therefore always accompanies a reply the
+   recipient can see anyway, and discloses nothing the reply did not.
+2. It is off by default (`SPEC-SEC-012`), and fails closed when the
+   configuration cannot be read.
+3. No read path can acknowledge, whatever the flag says (`SPEC-RCV-003`). The
+   raw `ReadHistory` request classes stay blacklisted and
+   `send_read_acknowledge` must appear in exactly one shipped file, which a
+   test enforces (`SPEC-LIM-006`).
+4. A refused or partly-failed send acknowledges nothing, so the receipt can
+   never reveal a send that did not land.
+
+**If it happens.** A receipt cannot be recalled. Set `TG_READ_ON_SEND=false`
+and restart the server; nothing further is emitted. Past receipts are visible
+only to the people already in those conversations.
+
+### RISK-12 - A permission error mistaken for a flood
+
+`is_flood_error` decides what counts toward the kill switch. It once returned
+`describe_telegram_error`'s *message string* for eight conditions that are not
+floods at all - `ChatAdminRequiredError` and `ChannelPrivateError` among them.
+Every string is truthy, and the sole caller only asks whether the result is
+truthy, so three ordinary permission errors within an hour tripped the
+24-hour account-wide kill switch. Nothing was rate-limited; the account simply
+stopped working, for a reason the flood log would misreport.
+
+**Mitigation.** `is_flood_error` returns a real `bool` and recognises exactly
+the four conditions `SPEC-LIM-003` names. Describing an error and counting it
+are separate questions, and only `describe_telegram_error` answers the first.
+`tests/test_safety.py::test_is_flood_error_returns_a_real_boolean` fails on a
+returned string, which is the specific mistake that hid this for so long.
+
+**If it happens.** `just tg-killswitch` shows why it tripped and
+`just tg-killswitch-clear` releases it. Check `api_flood_log` first: entries
+naming a permission error rather than a wait are this defect, not a real flood.
 
 ## Rules
 

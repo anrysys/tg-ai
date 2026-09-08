@@ -3,7 +3,7 @@ id: DOC-SECURITY
 title: Security
 status: active
 authority: authoritative
-updated: 2026-09-07
+updated: 2026-09-08
 related: [DOC-SRS, ADR-0004, ADR-0005, DOC-RUNBOOK-INDEX]
 ---
 
@@ -219,6 +219,56 @@ addressable index of people who never consented to being in it.
 **If it happens.** The rows are text and ids, not access hashes, so the archive
 alone cannot address anyone. Deleting a group's history removes them:
 `DELETE FROM dialogs WHERE chat_id = <id>` cascades to `messages`.
+
+### RISK-11 - A read receipt discloses when a chat was opened
+
+A read receipt is visible to the other person, cannot be withdrawn, and is a
+timestamp: it says the account owner was present at that moment. Someone who
+messages the account repeatedly can learn a daily rhythm from nothing but
+checkmarks. That is a disclosure the owner may not want, and it is not one this
+project can undo after the fact.
+
+There is a second, quieter version. Acknowledging on *every* read would emit
+those timestamps constantly - including for chats the owner never opened - so
+the badge state on their own phone would stop describing anything they did.
+
+**Mitigation.** Structural, in four places:
+
+1. Acknowledgment happens only after `tg_send_message` has delivered into a
+   Dialog (`SPEC-SND-009`). A receipt therefore always accompanies a reply the
+   recipient can see anyway, and discloses nothing the reply did not.
+2. It is off by default (`SPEC-SEC-012`), and fails closed when the
+   configuration cannot be read.
+3. No read path can acknowledge, whatever the flag says (`SPEC-RCV-003`). The
+   raw `ReadHistory` request classes stay blacklisted and
+   `send_read_acknowledge` must appear in exactly one shipped file, which a
+   test enforces (`SPEC-LIM-006`).
+4. A refused or partly-failed send acknowledges nothing, so the receipt can
+   never reveal a send that did not land.
+
+**If it happens.** A receipt cannot be recalled. Set `TG_READ_ON_SEND=false`
+and restart the server; nothing further is emitted. Past receipts are visible
+only to the people already in those conversations.
+
+### RISK-12 - A permission error mistaken for a flood
+
+`is_flood_error` decides what counts toward the kill switch. It once returned
+`describe_telegram_error`'s *message string* for eight conditions that are not
+floods at all - `ChatAdminRequiredError` and `ChannelPrivateError` among them.
+Every string is truthy, and the sole caller only asks whether the result is
+truthy, so three ordinary permission errors within an hour tripped the
+24-hour account-wide kill switch. Nothing was rate-limited; the account simply
+stopped working, for a reason the flood log would misreport.
+
+**Mitigation.** `is_flood_error` returns a real `bool` and recognises exactly
+the four conditions `SPEC-LIM-003` names. Describing an error and counting it
+are separate questions, and only `describe_telegram_error` answers the first.
+`tests/test_safety.py::test_is_flood_error_returns_a_real_boolean` fails on a
+returned string, which is the specific mistake that hid this for so long.
+
+**If it happens.** `just tg-killswitch` shows why it tripped and
+`just tg-killswitch-clear` releases it. Check `api_flood_log` first: entries
+naming a permission error rather than a wait are this defect, not a real flood.
 
 ## Rules
 

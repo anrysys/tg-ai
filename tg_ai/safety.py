@@ -157,85 +157,27 @@ _FLOOD_ERROR_TYPES: tuple[type[BaseException], ...] = tuple(
 def is_flood_error(exc: BaseException) -> bool:
     """Whether this exception counts toward the kill switch (SPEC-LIM-003).
 
-    Covers flood waits, slow-mode waits and premium flood waits. ``PeerFloodError``
-    is deliberately excluded: it is an escalation handled separately, not one
-    more data point in a rolling count.
+    Exactly the four conditions the clause names, and nothing else:
+    ``FloodWaitError``, ``SlowModeWaitError`` and ``FloodPremiumWaitError``
+    count; ``PeerFloodError`` does not, because it is an escalation handled
+    separately rather than one more data point in a rolling count.
+
+    This returns a real ``bool``. It once returned the *message strings* from
+    ``describe_telegram_error`` for eight other conditions - a copy-paste - and
+    every one of them was truthy, so an ordinary ``ChatAdminRequiredError`` or
+    ``ChannelPrivateError`` was recorded as a flood and three of them in an hour
+    tripped the 24-hour kill switch. Describing an error and counting it are
+    different questions; only ``describe_telegram_error`` answers the first.
     """
-    if isinstance(exc, errors.SlowModeWaitError):
-        # Not a subclass of FloodWaitError - a sibling - so it needs its own
-        # branch or it falls through untranslated. Slow mode is a property of
-        # the group, not a punishment: the correct response is to say how long
-        # and stop, never to retry (SPEC-SND-004).
-        return (
-            f"ERROR: This group has slow mode on and will not accept another "
-            f"message for {exc.seconds} seconds. Nothing was sent. Do not "
-            "retry in a loop - wait, or say something once."
-        )
-
-    if _FLOOD_PREMIUM_ERROR is not None and isinstance(exc, _FLOOD_PREMIUM_ERROR):
-        return "ERROR: " + FLOOD_WAIT_TEMPLATE.format(seconds=getattr(exc, "seconds", 0))
-
-    if isinstance(exc, errors.ApiIdPublishedFloodError):
-        # The api_id in use is a published one. Telegram treats the account
-        # behind a published api_id as an abuser, so this is not a wait.
-        return (
-            "ERROR: Telegram reports that this api_id is a published one "
-            "(API_ID_PUBLISHED_FLOOD). Stop using this application immediately "
-            "and tell the user: they must obtain their own api_id and api_hash "
-            "at https://my.telegram.org. A borrowed or sample api_id makes the "
-            "account behind it look like an abuser."
-        )
-
-    if isinstance(exc, errors.PhoneNumberBannedError):
-        return (
-            "ERROR: Telegram has banned this phone number. Nothing this server "
-            "does can change that. Stop and tell the user; an appeal goes "
-            "through Telegram support, from the official app."
-        )
-
-    if isinstance(exc, errors.UserBannedInChannelError):
-        # A spam-system signal, not a per-chat permission problem.
-        return (
-            "ERROR: This account is banned from writing in public groups and "
-            "channels. That is Telegram's anti-spam system acting on the whole "
-            "account, not this one chat. Stop sending, and tell the user to "
-            "check the account with @SpamBot from the official Telegram app."
-        )
-
-    if isinstance(exc, errors.ChatGuestSendForbiddenError):
-        return (
-            "ERROR: You must join this group before you can write in it. "
-            "Nothing was sent, and this server will not join it for you - "
-            "auto-joining is exactly the behaviour that gets personal accounts "
-            "flagged. Join it in the Telegram app if you want to reply there."
-        )
-
-    if isinstance(exc, errors.ChatAdminRequiredError):
-        return (
-            "ERROR: This action needs admin rights in that chat and the account "
-            "does not have them. Nothing was done, and there is nothing to retry."
-        )
-
-    if isinstance(exc, errors.ChannelPrivateError | errors.ChannelInvalidError):
-        return (
-            "ERROR: That channel is private, gone, or the account is not a "
-            "member of it. Nothing was requested. This server never joins a "
-            "channel to get access - ask the user to join it in the Telegram "
-            "app if they want it read."
-        )
-
-    if isinstance(exc, errors.TakeoutInitDelayError):
-        return (
-            f"ERROR: Telegram wants the data export confirmed from the official "
-            f"app before it will start, and is asking to wait {exc.seconds} "
-            "seconds. This project does not use the takeout API, so seeing this "
-            "means something unexpected requested one."
-        )
-
     if isinstance(exc, errors.PeerFloodError):
         return False
+    # SlowModeWaitError is a sibling of FloodWaitError, not a subclass, so it
+    # only counts because _FLOOD_ERROR_TYPES names it explicitly.
     if _FLOOD_ERROR_TYPES and isinstance(exc, _FLOOD_ERROR_TYPES):
         return True
+    # FloodPremiumWaitError does not exist in the pinned telethon 1.36.0, so the
+    # wire string is the only way to recognise it. A flood that went uncounted
+    # would be a blind spot in the one control that must not have one.
     return "FLOOD_PREMIUM_WAIT" in str(exc)
 
 

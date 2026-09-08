@@ -3,13 +3,16 @@ id: ADR-0009
 title: "Support groups and channels behind an explicit, persisted safety envelope"
 status: active
 authority: authoritative
-updated: 2026-09-07
-related: [DOC-ADR-INDEX, ADR-0004, ADR-0005, ADR-0010, DOC-SRS, DOC-DATA-MODEL, DOC-SECURITY, DOC-PRD]
+updated: 2026-09-08
+related: [DOC-ADR-INDEX, ADR-0004, ADR-0005, ADR-0010, ADR-0011, DOC-SRS, DOC-DATA-MODEL, DOC-SECURITY, DOC-PRD]
 ---
 
 # ADR-0009 - Groups and channels, behind a safety envelope
 
-**Status:** Accepted
+**Status:** Accepted. Its "marking messages read" consequence is superseded by
+[ADR-0011](0011-read-receipt-on-send.md) for the send path only; every other
+part of this decision - the blacklist, the budgets, the cooldowns, the group
+rationing and the ban on acknowledging while reading - stands unchanged.
 **Date:** 2026-09-07
 **Decides:** `SPEC-SEC-006` .. `SPEC-SEC-009`, `SPEC-LIM-001` .. `SPEC-LIM-007`,
 `SPEC-SYNC-001`, `SPEC-SYNC-007`, `SPEC-SND-001`, `SPEC-SND-006`,
@@ -298,6 +301,10 @@ would otherwise assume it is a foreign key to a person.
   marking messages read, remote access - stay, and are now *structurally
   enforced* by the blacklist, by never calling `readHistory`, and by
   `SPEC-SEC-006`, rather than merely stated.
+  **Superseded in part by [ADR-0011](0011-read-receipt-on-send.md):** reading
+  still never acknowledges anything, but `tg_send_message` marks a Dialog read
+  after delivering into it. The reasoning above is about marking read as a side
+  effect of a *read*, and still holds for every read path.
 - The glossary widens: a Peer is now a User, Group or Channel, and a Dialog is a
   conversation with a Peer of any type. `dialogs` and `PeerIndex` keep their
   names.

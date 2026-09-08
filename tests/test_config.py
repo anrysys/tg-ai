@@ -61,3 +61,18 @@ def test_expected_username_is_normalised_without_the_at_sign(clean_env):
     clean_env.setenv("DATABASE_URL", VALID_DB)
     clean_env.setenv("TG_EXPECTED_USERNAME", "@anrysys")
     assert load_config().expected_username == "anrysys"
+
+
+def test_read_on_send_is_off_unless_the_account_owner_turns_it_on(clean_env):
+    # The conservative default. Marking a chat read is visible to the other
+    # person and irreversible, so it stays off until someone opts in
+    # (SPEC-SEC-012, ADR-0011).
+    clean_env.setenv("DATABASE_URL", VALID_DB)
+    assert load_config(require_telegram=False).read_on_send is False
+
+
+def test_read_on_send_is_enabled_by_the_usual_truthy_spellings(clean_env):
+    clean_env.setenv("DATABASE_URL", VALID_DB)
+    for spelling in ("true", "TRUE", "1", "yes", "on"):
+        clean_env.setenv("TG_READ_ON_SEND", spelling)
+        assert load_config(require_telegram=False).read_on_send is True, spelling
