@@ -3,7 +3,7 @@
   "name": "io.github.anrysys/tg-ai",
   "description": "Local MCP server that lets an AI agent drive your personal Telegram account over MTProto: send as you, read replies, full-text search your whole chat history in PostgreSQL, and draft replies in your own per-chat writing style. Anti-ban guardrails built in.",
   "status": "active",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/anrysys/tg-ai",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "mcpb",
       "registryBaseUrl": "https://github.com",
       "identifier": "https://github.com/anrysys/tg-ai",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },

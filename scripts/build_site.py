@@ -31,6 +31,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
 
+#: The version has exactly one home, `tg_ai/__init__.py` (AGENTS.md section 4),
+#: and the JSON-LD below has to agree with it. It is read rather than imported
+#: because this script runs as `python scripts/build_site.py`, which puts
+#: `scripts/` on sys.path and not the repository root - the same trap that once
+#: turned CI red on `import tg_ai`.
+VERSION = re.search(
+    r'^__version__ = "([^"]+)"',
+    (ROOT / "tg_ai" / "__init__.py").read_text(encoding="utf-8"),
+    re.MULTILINE,
+).group(1)
+
 BASE_URL = "https://anrysys.github.io/tg-ai"
 REPO_URL = "https://github.com/anrysys/tg-ai"
 BLOB = f"{REPO_URL}/blob/main"
@@ -406,7 +417,7 @@ def json_ld(page: dict[str, str], markdown: str) -> str:
                 "downloadUrl": REPO_URL,
                 "codeRepository": REPO_URL,
                 "programmingLanguage": "Python",
-                "softwareVersion": "0.1.0",
+                "softwareVersion": VERSION,
                 "license": "https://opensource.org/licenses/MIT",
                 "description": page["description"],
                 "softwareRequirements": "Python 3.12+, PostgreSQL 16, Docker, uv, just",
