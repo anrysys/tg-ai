@@ -215,7 +215,7 @@
           "name": "Does it store my messages' media, or delete anything?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Neither. Only message text is archived. The server never deletes or edits anything on your account, and reading never marks a chat as read - fetch as much of a conversation as you like, the sender still sees one checkmark and your unread badges stay where they are. Sending is the one exception, and it is off by default. Set TGREADONSEND=true and delivering a reply marks *that* chat read afterwards, which is what your own Telegram app does when you open a chat to answer it. Left unset, nothing this project does ever turns a sender's single checkmark into two (ADR-0011)."
+            "text": "Neither. Only message text is archived. The server never deletes or edits anything on your account, and reading never marks a chat as read - fetch as much of a conversation as you like, the sender still sees one checkmark and your unread badges stay where they are. Sending is the one exception, and it is off by default. Set TGREADONSEND=true and delivering a reply marks that chat read afterwards, which is what your own Telegram app does when you open a chat to answer it. Left unset, nothing this project does ever turns a sender's single checkmark into two (ADR-0011)."
           }
         }
       ]
@@ -509,7 +509,7 @@ args = [&quot;/absolute/path/to/tg-ai/server.py&quot;]</code></pre>
 <p>Because the point is search. Postgres gives generated <code>tsvector</code> columns, GIN indexes and <code>pg_trgm</code> for free, so a query over years of history returns in milliseconds and partial words still match (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0006-raw-sql-asyncpg-no-orm.md" target="_blank" rel="noopener">ADR-0006</a>).</p>
 <h3 id="does-it-store-my-messages-media-or-delete-anything"><a class="anchor" href="#does-it-store-my-messages-media-or-delete-anything">#</a>Does it store my messages' media, or delete anything?</h3>
 <p>Neither. Only message text is archived. The server never deletes or edits anything on your account, and <strong>reading never marks a chat as read</strong> - fetch as much of a conversation as you like, the sender still sees one checkmark and your unread badges stay where they are.</p>
-<p>Sending is the one exception, and it is off by default. Set <code>TG_READ_ON_SEND=true</code> and delivering a reply marks *that* chat read afterwards, which is what your own Telegram app does when you open a chat to answer it. Left unset, nothing this project does ever turns a sender's single checkmark into two (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0011-read-receipt-on-send.md" target="_blank" rel="noopener">ADR-0011</a>).</p>
+<p>Sending is the one exception, and it is off by default. Set <code>TG_READ_ON_SEND=true</code> and delivering a reply marks <em>that</em> chat read afterwards, which is what your own Telegram app does when you open a chat to answer it. Left unset, nothing this project does ever turns a sender's single checkmark into two (<a href="https://github.com/anrysys/tg-ai/blob/main/docs/20-architecture/adr/0011-read-receipt-on-send.md" target="_blank" rel="noopener">ADR-0011</a>).</p>
 <h2 id="commands"><a class="anchor" href="#commands">#</a>Commands</h2>
 <pre><code class="language-bash">just              # list everything
 just check        # ruff + black + pytest + docs checks

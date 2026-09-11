@@ -551,7 +551,7 @@ much of a conversation as you like, the sender still sees one checkmark and your
 unread badges stay where they are.
 
 Sending is the one exception, and it is off by default. Set
-`TG_READ_ON_SEND=true` and delivering a reply marks *that* chat read afterwards,
+`TG_READ_ON_SEND=true` and delivering a reply marks _that_ chat read afterwards,
 which is what your own Telegram app does when you open a chat to answer it. Left
 unset, nothing this project does ever turns a sender's single checkmark into two
 ([ADR-0011](docs/20-architecture/adr/0011-read-receipt-on-send.md)).
